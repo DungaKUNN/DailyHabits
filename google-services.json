@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "732637485915",
+    "project_id": "micomida-gastos",
+    "storage_bucket": "micomida-gastos.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:732637485915:android:e9c2fa868a306d6c0ed87e",
+        "android_client_info": {
+          "package_name": "com.casabalance"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAd-CgrkH0YeTZimKiIFppIeJJH_tDxIyE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:732637485915:android:fcd16717ab4700b00ed87e",
+        "android_client_info": {
+          "package_name": "com.micomida"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAd-CgrkH0YeTZimKiIFppIeJJH_tDxIyE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
