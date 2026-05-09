@@ -109,14 +109,6 @@ const ExpensesScreen: React.FC = () => {
     }
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!groupCode) {
-        loadDataLocal();
-      }
-    }, [groupCode])
-  );
-
   const loadDataLocal = async () => {
     try {
       const repo = new SQLiteExpenseRepository(getDatabase());
@@ -506,10 +498,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingTop: 50,
-    paddingBottom: 15,
+    paddingTop: 60,
+    paddingBottom: 20,
     paddingHorizontal: 20,
-    backgroundColor: colors.header.background,
+    backgroundColor: colors.primary.main,
   },
   headerTop: {
     flexDirection: 'row',
@@ -517,68 +509,76 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: colors.header.text,
+    color: colors.common.white,
   },
   headerSubtitle: {
     fontSize: 14,
-    color: colors.header.text,
+    color: colors.common.white,
     opacity: 0.9,
-    marginTop: 2,
+    marginTop: 4,
   },
   shareCodeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
   },
   shareCodeIcon: {
-    fontSize: 16,
-    marginRight: 4,
+    fontSize: 14,
+    marginRight: 6,
   },
   shareCodeText: {
-    fontSize: 13,
-    color: colors.header.text,
+    fontSize: 12,
+    color: colors.common.white,
     fontWeight: '600',
   },
   codeBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    marginTop: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
     alignSelf: 'flex-start',
   },
   codeLabel: {
     fontSize: 12,
-    color: colors.header.text,
-    opacity: 0.8,
-    marginRight: 6,
+    color: colors.common.white,
+    opacity: 0.9,
+    marginRight: 8,
   },
   codeValue: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: colors.header.text,
-    letterSpacing: 2,
+    color: colors.common.white,
+    letterSpacing: 3,
   },
   scrollView: {
     flex: 1,
   },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 12,
+  },
   settingsCard: {
-    margin: 16,
-    marginBottom: 8,
+    marginHorizontal: 20,
+    marginBottom: 12,
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 1,
   },
   settingsButton: {
     flexDirection: 'row',
@@ -669,16 +669,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   periodCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    elevation: 3,
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    marginHorizontal: 20,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
   periodCardGradient: {
-    padding: 16,
+    padding: 20,
   },
   periodHeader: {
     flexDirection: 'row',
@@ -688,39 +690,39 @@ const styles = StyleSheet.create({
   },
   periodMonth: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: colors.text,
   },
   periodTotal: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#2196F3',
+    color: colors.primary.main,
   },
   periodDetails: {
-    gap: 12,
-    marginBottom: 12,
+    gap: 14,
+    marginBottom: 8,
   },
   periodDetail: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   periodDetailIcon: {
-    fontSize: 24,
+    fontSize: 22,
     marginRight: 12,
   },
   periodDetailLabel: {
-    fontSize: 12,
-    color: '#999',
+    fontSize: 13,
+    color: colors.textMuted,
     fontWeight: '500',
   },
   periodDetailValue: {
     fontSize: 14,
-    color: '#333',
+    color: colors.text,
     fontWeight: '600',
   },
   tapHint: {
     fontSize: 11,
-    color: '#bbb',
+    color: colors.textMuted,
     textAlign: 'center',
     marginTop: 12,
   },

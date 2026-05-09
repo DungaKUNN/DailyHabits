@@ -1,6 +1,5 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { Meal } from '../domain/entities/Meal';
 import { getNotificationSettings } from './SettingsService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -8,6 +7,7 @@ let isInitialized = false;
 
 const PAYMENT_REMINDER_KEY = '@payment_reminders_enabled';
 const PAYMENT_REMINDER_HOUR = '@payment_reminder_hour';
+const PAYMENT_REMINDER_MINUTE = '@payment_reminder_minute';
 const PAYMENT_REMINDER_DAYS = '@payment_reminder_days';
 
 const MOTIVATIONAL_MESSAGES = {
@@ -89,79 +89,9 @@ export const requestNotificationPermissions = async (): Promise<boolean> => {
   }
 };
 
-export const scheduleMealReminder = async (meal: Meal, customMinutes?: number): Promise<string | null> => {
-  try {
-    await initNotifications();
-    
-    const hasPermission = await requestNotificationPermissions();
-    if (!hasPermission) return null;
-
-    const settings = await getNotificationSettings();
-    
-    if (!settings.enabled) return null;
-
-    const scheduledDate = new Date(meal.scheduledTime);
-    const now = new Date();
-    
-    const reminderMinutes = customMinutes ?? 30;
-    const reminderDate = new Date(scheduledDate);
-    reminderDate.setMinutes(reminderDate.getMinutes() - reminderMinutes);
-
-    if (reminderDate <= now) return null;
-
-    const secondsFromNow = Math.floor((reminderDate.getTime() - now.getTime()) / 1000);
-
-    const typeLabels: Record<string, string> = {
-      breakfast: 'Desayuno',
-      lunch: 'Almuerzo',
-      dinner: 'Cena',
-    };
-
-    const motivationalMessage = getRandomMessage(meal.type);
-    const timeText = reminderMinutes === 0 
-      ? '¡Es la hora!'
-      : `En ${reminderMinutes} min`;
-
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: `🍽️ ${typeLabels[meal.type] || 'Comida'}`,
-        body: `${timeText}: ${meal.name}\n${motivationalMessage}`,
-        data: { 
-          mealId: meal.id, 
-          type: meal.type, 
-          scheduledTime: meal.scheduledTime, 
-          reminderMinutes 
-        },
-        sound: settings.soundEnabled ? 'default' : undefined,
-        vibrate: settings.vibrateEnabled ? [0, 250, 250, 250] : undefined,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: {
-        seconds: secondsFromNow,
-        channelId: 'meal-reminders',
-      },
-    });
-    
-    return notificationId;
-  } catch (error) {
-    console.error('Error scheduling notification:', error);
-    return null;
-  }
-};
-
-export const cancelMealReminder = async (mealId: string): Promise<void> => {
-  try {
-    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-    
-    for (const notification of scheduled) {
-      if (notification.content.data?.mealId === mealId) {
-        await Notifications.cancelScheduledNotificationAsync(notification.identifier);
-      }
-    }
-  } catch (error) {
-    console.error('Error canceling:', error);
-  }
-};
+// Meal reminder functions removed - meals feature was disabled
+// export const scheduleMealReminder = async (meal: Meal, customMinutes?: number): Promise<string | null> => { ... }
+// export const cancelMealReminder = async (mealId: string): Promise<void> => { ... }
 
 export const cancelAllReminders = async (): Promise<void> => {
   try {
@@ -193,26 +123,30 @@ export const QUICK_REMINDER_OPTIONS = [
 export interface PaymentReminderSettings {
   enabled: boolean;
   hour: number;
+  minute: number;
   days: number[];
 }
 
 export const getDefaultPaymentReminderSettings = (): PaymentReminderSettings => ({
   enabled: false,
   hour: 9,
+  minute: 0,
   days: [1, 2, 3, 4, 5],
 });
 
 export const getPaymentReminderSettings = async (): Promise<PaymentReminderSettings> => {
   try {
-    const [enabledStr, hourStr, daysStr] = await Promise.all([
+    const [enabledStr, hourStr, minuteStr, daysStr] = await Promise.all([
       AsyncStorage.getItem(PAYMENT_REMINDER_KEY),
       AsyncStorage.getItem(PAYMENT_REMINDER_HOUR),
+      AsyncStorage.getItem(PAYMENT_REMINDER_MINUTE),
       AsyncStorage.getItem(PAYMENT_REMINDER_DAYS),
     ]);
     
     return {
       enabled: enabledStr === 'true',
       hour: hourStr ? parseInt(hourStr) : 9,
+      minute: minuteStr ? parseInt(minuteStr) : 0,
       days: daysStr ? JSON.parse(daysStr) : [1, 2, 3, 4, 5],
     };
   } catch (error) {
@@ -226,6 +160,7 @@ export const savePaymentReminderSettings = async (settings: PaymentReminderSetti
     await Promise.all([
       AsyncStorage.setItem(PAYMENT_REMINDER_KEY, settings.enabled.toString()),
       AsyncStorage.setItem(PAYMENT_REMINDER_HOUR, settings.hour.toString()),
+      AsyncStorage.setItem(PAYMENT_REMINDER_MINUTE, settings.minute.toString()),
       AsyncStorage.setItem(PAYMENT_REMINDER_DAYS, JSON.stringify(settings.days)),
     ]);
   } catch (error) {
@@ -272,7 +207,7 @@ export const schedulePaymentReminders = async (): Promise<void> => {
       const targetYear = currentYear + Math.floor((currentMonth + monthOffset) / 12);
 
       for (const day of settings.days) {
-        const reminderDate = new Date(targetYear, targetMonth, day, settings.hour, 0, 0);
+        const reminderDate = new Date(targetYear, targetMonth, day, settings.hour, settings.minute, 0);
         
         if (monthOffset === 0 && day <= currentDay) {
           continue;

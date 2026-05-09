@@ -46,7 +46,7 @@ export class SQLiteFinanceRepository {
   }
 
   async getAllPeriods(): Promise<FinancePeriod[]> {
-    const rows = await this.db.getAllAsync<any>('SELECT * FROM finance_periods ORDER BY year DESC, month DESC');
+    const rows = await this.db.getAllAsync<any>('SELECT * FROM finance_periods ORDER BY year ASC, month ASC');
     return rows.map(row => this.mapRowToPeriod(row));
   }
 

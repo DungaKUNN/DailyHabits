@@ -16,6 +16,7 @@ import { colors } from '../theme/colors';
 import { format, subDays, startOfWeek, endOfWeek, isSameDay, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpensePeriod } from '../../domain/entities/Expense';
 import { FinancePeriod, FinanceDebt } from '../../domain/entities/Finance';
 import { getDatabase } from '../../data/Database';
@@ -78,6 +79,24 @@ const StatisticsScreen: React.FC = () => {
 
   const [financePeriods, setFinancePeriods] = useState<FinancePeriod[]>([]);
   const [currentMonth, setCurrentMonth] = useState('');
+  const [currentChartIndex, setCurrentChartIndex] = useState(0);
+  const [chartViewMode, setChartViewMode] = useState<'single' | 'all'>('single');
+  
+  const [chartData, setChartData] = useState<{
+    monthlyLabels: string[];
+    years: number[];
+    incomeData: number[];
+    expenseData: number[];
+    categoryData: { name: string; amount: number; color: string; legendFontColor: string }[];
+    trendData: number[];
+  }>({
+    monthlyLabels: [],
+    years: [],
+    incomeData: [],
+    expenseData: [],
+    categoryData: [],
+    trendData: [],
+  });
   
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
@@ -96,10 +115,23 @@ const StatisticsScreen: React.FC = () => {
   );
 
   const loadAllData = async () => {
+    setCurrentChartIndex(0);
     await Promise.all([
       loadSummaryData(),
       loadExpenseData(),
     ]);
+    if (timeRange === 'month') {
+      const repo = new SQLiteFinanceRepository(getDatabase());
+      const allPeriods = await repo.getAllPeriods();
+      const sortedPeriods = [...allPeriods].sort((a, b) => {
+        const monthA = parseInt(a.month.split('-')[1]);
+        const monthB = parseInt(b.month.split('-')[1]);
+        return monthB - monthA;
+      });
+      const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
+      const index = sortedPeriods.findIndex(p => p.year === selectedYear && parseInt(p.month.split('-')[1]) === selectedMonth + 1);
+      if (index >= 0) setCurrentChartIndex(index);
+    }
   };
 
   const loadSummaryData = async () => {
@@ -107,20 +139,72 @@ const StatisticsScreen: React.FC = () => {
       const repo = new SQLiteFinanceRepository(getDatabase());
       const allPeriods = await repo.getAllPeriods();
       
+      const sortedPeriods = [...allPeriods].sort((a, b) => {
+        const yearA = a.year;
+        const yearB = b.year;
+        const monthA = parseInt(a.month.split('-')[1]);
+        const monthB = parseInt(b.month.split('-')[1]);
+        if (yearA !== yearB) return yearA - yearB;
+        return monthA - monthB;
+      });
+      
       let filteredPeriods = allPeriods;
+      let chartPeriods = allPeriods;
       let monthLabel = '';
       
       if (timeRange === 'month') {
         const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
         filteredPeriods = allPeriods.filter(p => p.month === monthStr);
+        const targetIndex = sortedPeriods.findIndex(p => p.year === selectedYear && parseInt(p.month.split('-')[1]) === selectedMonth + 1);
+        chartPeriods = targetIndex >= 0 ? sortedPeriods.slice(0, targetIndex + 1) : [];
         monthLabel = `${MONTHS[selectedMonth]} ${selectedYear}`;
       } else {
-        filteredPeriods = allPeriods.slice(0, 5);
-        monthLabel = 'Últimos 5 meses';
+        chartPeriods = sortedPeriods;
+        filteredPeriods = sortedPeriods;
+        monthLabel = 'Todos los períodos';
       }
       
       setFinancePeriods(filteredPeriods);
       setCurrentMonth(monthLabel);
+      
+      const monthlyLabels = chartPeriods.map(p => p.monthName.substring(0, 3));
+      const years = chartPeriods.map(p => p.year);
+      const incomeData = chartPeriods.map(p => p.income.reduce((sum, i) => sum + i.amount, 0));
+      const expenseData = chartPeriods.map(p => p.expenses.reduce((sum, e) => sum + e.amount, 0));
+      
+      const categoryColors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#00D09E', '#E53935'];
+      const categoryMap = new Map<string, number>();
+      
+      filteredPeriods.forEach(period => {
+        period.expenses.forEach(exp => {
+          const current = categoryMap.get(exp.category) || 0;
+          categoryMap.set(exp.category, current + exp.amount);
+        });
+      });
+      
+      const categoryData = Array.from(categoryMap.entries())
+        .map(([name, amount], index) => ({
+          name,
+          amount,
+          color: categoryColors[index % categoryColors.length],
+          legendFontColor: '#666',
+        }))
+        .sort((a, b) => b.amount - a.amount);
+      
+      const trendData = filteredPeriods.map(p => {
+        const income = p.income.reduce((sum, i) => sum + i.amount, 0);
+        const expenses = p.expenses.reduce((sum, e) => sum + e.amount, 0);
+        return income - expenses;
+      });
+      
+      setChartData({
+        monthlyLabels,
+        years,
+        incomeData,
+        expenseData,
+        categoryData,
+        trendData,
+      });
 
       if (filteredPeriods.length > 0) {
         const current = filteredPeriods[0];
@@ -238,6 +322,467 @@ const StatisticsScreen: React.FC = () => {
   const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
   const formatPercent = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)}%`;
 
+  const SimpleBarChart: React.FC<{
+    labels: string[];
+    years: number[];
+    incomeData: number[];
+    expenseData: number[];
+  }> = ({ labels, years, incomeData, expenseData }) => {
+    const safeLabels = labels && labels.length > 0 ? labels : [''];
+    const safeYears = years && years.length > 0 ? years : [0];
+    const safeIncome = incomeData && incomeData.length > 0 ? incomeData : [0];
+    const safeExpense = expenseData && expenseData.length > 0 ? expenseData : [0];
+    
+    const [pageIndex, setPageIndex] = useState(0);
+    const itemsPerPage = 4;
+    const totalPages = Math.max(1, Math.ceil(safeLabels.length / itemsPerPage));
+    const startIdx = pageIndex * itemsPerPage;
+    const endIdx = Math.min(startIdx + itemsPerPage, safeLabels.length);
+    
+    const pageLabels = safeLabels.slice(startIdx, endIdx);
+    const pageIncome = safeIncome.slice(startIdx, endIdx);
+    const pageExpense = safeExpense.slice(startIdx, endIdx);
+    const pageYears = safeYears.slice(startIdx, endIdx);
+    
+    const maxValue = Math.max(...pageIncome, ...pageExpense, 1);
+    const chartHeight = 120;
+    
+    const totalIncome = safeIncome.reduce((a, b) => a + b, 0);
+    const totalExpense = safeExpense.reduce((a, b) => a + b, 0);
+    const netBalance = totalIncome - totalExpense;
+    
+    return (
+      <View style={customChartStyles.container}>
+        <View style={customChartStyles.barSummary}>
+          <View style={customChartStyles.barSummaryItem}>
+            <Text style={[customChartStyles.barSummaryLabel, { color: '#2196F3' }]}>Total Ingresos</Text>
+            <Text style={[customChartStyles.barSummaryValue, { color: '#2196F3' }]}>{formatCurrency(totalIncome)}</Text>
+          </View>
+          <View style={customChartStyles.barSummaryItem}>
+            <Text style={[customChartStyles.barSummaryLabel, { color: '#E53935' }]}>Total Gastos</Text>
+            <Text style={[customChartStyles.barSummaryValue, { color: '#E53935' }]}>{formatCurrency(totalExpense)}</Text>
+          </View>
+          <View style={customChartStyles.barSummaryItem}>
+            <Text style={[customChartStyles.barSummaryLabel, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>Balance</Text>
+            <Text style={[customChartStyles.barSummaryValue, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>{formatCurrency(netBalance)}</Text>
+          </View>
+        </View>
+        {totalPages > 1 && (
+          <View style={customChartStyles.pageNav}>
+            <TouchableOpacity 
+              style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
+              onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
+              disabled={pageIndex === 0}
+            >
+              <Text style={customChartStyles.pageBtnText}>‹</Text>
+            </TouchableOpacity>
+            <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
+            <TouchableOpacity 
+              style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
+              onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
+              disabled={pageIndex >= totalPages - 1}
+            >
+              <Text style={customChartStyles.pageBtnText}>›</Text>
+            </TouchableOpacity>
+          </View>
+)}
+        <View style={customChartStyles.barHorizontalContainer}>
+          {pageLabels.map((label, index) => (
+            <View key={label + index} style={customChartStyles.barGroup}>
+              <View style={customChartStyles.barsContainer}>
+                <View style={[customChartStyles.barIncome, { height: Math.max((pageIncome[index] || 0) / maxValue * chartHeight, 4) }]} />
+                <View style={[customChartStyles.barExpense, { height: Math.max((pageExpense[index] || 0) / maxValue * chartHeight, 4) }]} />
+              </View>
+              <View style={customChartStyles.barValuesRow}>
+                <View style={customChartStyles.barValueItem}>
+                  <View style={[customChartStyles.barDot, { backgroundColor: '#2196F3' }]} />
+                  <Text style={customChartStyles.barValue}>{formatCurrency(pageIncome[index] || 0)}</Text>
+                </View>
+                <View style={customChartStyles.barValueItem}>
+                  <View style={[customChartStyles.barDot, { backgroundColor: '#E53935' }]} />
+                  <Text style={customChartStyles.barValue}>{formatCurrency(pageExpense[index] || 0)}</Text>
+                </View>
+              </View>
+              <Text style={customChartStyles.barLabel}>{pageLabels[index]}</Text>
+              <Text style={customChartStyles.barYear}>{pageYears[index]}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const SimplePieChart: React.FC<{
+    data: { name: string; amount: number; color: string }[];
+  }> = ({ data }) => {
+    const total = data.reduce((sum, item) => sum + item.amount, 0);
+    if (total === 0) return null;
+    
+    return (
+      <View style={customChartStyles.pieContainer}>
+        {data.map((item, index) => (
+          <View key={item.name} style={customChartStyles.pieRow}>
+            <View style={[customChartStyles.pieDot, { backgroundColor: item.color }]} />
+            <Text style={customChartStyles.pieLabel}>{item.name}</Text>
+            <Text style={customChartStyles.pieValue}>{formatCurrency(item.amount)}</Text>
+            <Text style={customChartStyles.piePercent}>{Math.round((item.amount / total) * 100)}%</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const SimpleLineChart: React.FC<{
+    labels: string[];
+    years: number[];
+    data: number[];
+  }> = ({ labels, years, data }) => {
+    const [pageIndex, setPageIndex] = useState(0);
+    const itemsPerPage = 6;
+    const totalPages = Math.ceil(labels.length / itemsPerPage);
+    const startIdx = pageIndex * itemsPerPage;
+    const endIdx = Math.min(startIdx + itemsPerPage, labels.length);
+    
+    const pageLabels = labels.slice(startIdx, endIdx);
+    const pageData = data.slice(startIdx, endIdx);
+    const pageYears = years.slice(startIdx, endIdx);
+    
+    const isSingleMonth = data.length === 1;
+    const value = data[0] || 0;
+    const isPositive = value >= 0;
+    
+    if (isSingleMonth) {
+      return (
+        <View style={customChartStyles.lineContainer}>
+          <View style={customChartStyles.lineSummary}>
+            <Text style={[customChartStyles.lineSummaryText, { color: isPositive ? '#43A047' : '#E53935' }]}>
+              Balance: {formatCurrency(value)} ({isPositive ? 'positivo' : 'negativo'})
+            </Text>
+          </View>
+          <View style={customChartStyles.balanceBarContainer}>
+            <View style={customChartStyles.balanceBarGroup}>
+              <Text style={[customChartStyles.balanceBarValue, { color: isPositive ? '#43A047' : '#E53935' }]}>
+                {formatCurrency(value)}
+              </Text>
+              <View style={customChartStyles.balanceBarWrapper}>
+                <View 
+                  style={[
+                    customChartStyles.balanceBar, 
+                    { 
+                      height: 100,
+                      backgroundColor: isPositive ? '#43A047' : '#E53935',
+                      borderTopLeftRadius: 4,
+                      borderTopRightRadius: 4,
+                      borderBottomLeftRadius: isPositive ? 0 : 4,
+                      borderBottomRightRadius: isPositive ? 0 : 4,
+                      marginTop: isPositive ? 0 : undefined,
+                      marginBottom: isPositive ? undefined : 0,
+                    }
+                  ]} 
+                />
+              </View>
+              <Text style={customChartStyles.balanceBarLabel}>{labels[0]}</Text>
+              <Text style={customChartStyles.balanceBarYear}>{years[0]}</Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+    
+    const maxValue = Math.max(...pageData.filter(v => v > 0), 1);
+    const minValue = Math.min(...pageData.filter(v => v < 0), 0);
+    const chartHeight = 120;
+    
+    const totalPositive = data.filter(v => v > 0).reduce((a, b) => a + b, 0);
+    const totalNegative = Math.abs(data.filter(v => v < 0).reduce((a, b) => a + b, 0));
+    const netTrend = totalPositive - totalNegative;
+    
+    return (
+      <View style={customChartStyles.lineContainer}>
+        <View style={customChartStyles.lineSummary}>
+          <Text style={[customChartStyles.lineSummaryText, { color: netTrend >= 0 ? '#43A047' : '#E53935' }]}>
+            Balance Total: {formatCurrency(netTrend)} ({netTrend >= 0 ? 'positivo' : 'negativo'})
+          </Text>
+        </View>
+        {totalPages > 1 && (
+          <View style={customChartStyles.pageNav}>
+            <TouchableOpacity 
+              style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
+              onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
+              disabled={pageIndex === 0}
+            >
+              <Text style={customChartStyles.pageBtnText}>‹</Text>
+            </TouchableOpacity>
+            <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
+            <TouchableOpacity 
+              style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
+              onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
+              disabled={pageIndex >= totalPages - 1}
+            >
+              <Text style={customChartStyles.pageBtnText}>›</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        <View style={customChartStyles.balanceBarContainer}>
+          {pageData.map((val, index) => {
+            const pos = val >= 0;
+            const barHeight = pos 
+              ? (val / maxValue) * chartHeight 
+              : (Math.abs(val) / Math.abs(minValue)) * chartHeight;
+            return (
+              <View key={index} style={customChartStyles.balanceBarGroup}>
+                <Text style={[customChartStyles.balanceBarValue, { color: pos ? '#43A047' : '#E53935' }]}>
+                  {formatCurrency(val)}
+                </Text>
+                <View style={customChartStyles.balanceBarWrapper}>
+                  <View 
+                    style={[
+                      customChartStyles.balanceBar, 
+                      { 
+                        height: Math.max(barHeight, 4),
+                        backgroundColor: pos ? '#43A047' : '#E53935',
+                        borderTopLeftRadius: pos ? 4 : 0,
+                        borderTopRightRadius: pos ? 4 : 0,
+                        borderBottomLeftRadius: pos ? 0 : 4,
+                        borderBottomRightRadius: pos ? 0 : 4,
+                        marginTop: pos ? 0 : undefined,
+                        marginBottom: pos ? undefined : 0,
+                      }
+                    ]} 
+                  />
+                </View>
+                <Text style={customChartStyles.balanceBarLabel}>{pageLabels[index]}</Text>
+                <Text style={customChartStyles.balanceBarYear}>{pageYears[index]}</Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+  const customChartStyles = StyleSheet.create({
+    container: {
+      paddingVertical: 10,
+      minHeight: 200,
+    },
+    barSummary: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginBottom: 16,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#eee',
+    },
+    barSummaryItem: {
+      alignItems: 'center',
+    },
+    barSummaryLabel: {
+      fontSize: 11,
+      color: '#666',
+      marginBottom: 4,
+    },
+    barSummaryValue: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    barGroup: {
+      alignItems: 'center',
+      flex: 1,
+      paddingHorizontal: 2,
+    },
+    barValuesRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 6,
+    },
+    barValueItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+    },
+    barDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    barValue: {
+      fontSize: 8,
+      color: '#666',
+    },
+    barsContainer: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      height: 120,
+      gap: 4,
+    },
+    barIncome: {
+      width: 22,
+      backgroundColor: '#2196F3',
+      borderRadius: 4,
+    },
+    barExpense: {
+      width: 22,
+      backgroundColor: '#E53935',
+      borderRadius: 4,
+    },
+    barLabel: {
+      fontSize: 11,
+      color: '#666',
+      marginTop: 8,
+    },
+    barYear: {
+      fontSize: 9,
+      color: '#999',
+    },
+    barHorizontalContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      alignItems: 'flex-end',
+      paddingVertical: 10,
+    },
+    pageNav: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
+      marginTop: 8,
+      gap: 12,
+    },
+    pageBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: '#e0e0e0',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    pageBtnDisabled: {
+      opacity: 0.4,
+    },
+    pageBtnText: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: '#333',
+    },
+    pageIndicator: {
+      fontSize: 12,
+      color: '#666',
+    },
+    pieContainer: {
+      gap: 8,
+    },
+    pieRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 6,
+    },
+    pieDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      marginRight: 10,
+    },
+    pieLabel: {
+      flex: 1,
+      fontSize: 13,
+      color: '#333',
+    },
+    pieValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#333',
+      marginRight: 8,
+    },
+    piePercent: {
+      fontSize: 12,
+      color: '#666',
+      width: 40,
+      textAlign: 'right',
+    },
+    lineContainer: {
+      paddingVertical: 10,
+    },
+    lineSummary: {
+      alignItems: 'center',
+      marginBottom: 12,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#eee',
+    },
+    lineSummaryText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    lineChartArea: {
+      height: 100,
+      position: 'relative',
+      backgroundColor: '#f8f9fa',
+      borderRadius: 8,
+    },
+    lineDot: {
+      position: 'absolute',
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: '#00D09E',
+      borderWidth: 2,
+      borderColor: '#fff',
+    },
+    lineValuesRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      paddingHorizontal: 4,
+    },
+    lineValue: {
+      fontSize: 10,
+      fontWeight: '500',
+    },
+    lineLabels: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 6,
+    },
+    lineLabel: {
+      fontSize: 10,
+      color: '#666',
+    },
+    balanceBarContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      alignItems: 'flex-end',
+      height: 160,
+      paddingVertical: 10,
+    },
+    balanceBarGroup: {
+      alignItems: 'center',
+      flex: 1,
+    },
+    balanceBarValue: {
+      fontSize: 9,
+      fontWeight: '600',
+      marginBottom: 4,
+    },
+    balanceBarWrapper: {
+      height: 120,
+      justifyContent: 'flex-end',
+    },
+    balanceBar: {
+      width: 28,
+    },
+    balanceBarLabel: {
+      fontSize: 10,
+      color: '#666',
+      marginTop: 4,
+    },
+    balanceBarYear: {
+      fontSize: 9,
+      color: '#999',
+    },
+  });
+
   const renderCircularProgress = (percentage: number, size: number = 80) => {
     const strokeWidth = 8;
     const radius = (size - strokeWidth) / 2;
@@ -353,6 +898,127 @@ const StatisticsScreen: React.FC = () => {
             : 'Gastaste más de lo que ganaste ⚠️'}
         </Text>
       </View>
+
+      {chartData.monthlyLabels.length > 0 && (
+        <>
+          <View style={styles.chartViewToggle}>
+            <TouchableOpacity
+              style={[styles.chartToggleBtn, chartViewMode === 'single' && styles.chartToggleBtnActive]}
+              onPress={() => { setChartViewMode('single'); setCurrentChartIndex(0); }}
+            >
+              <Text style={[styles.chartToggleText, chartViewMode === 'single' && styles.chartToggleTextActive]}>
+                Mes
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chartToggleBtn, chartViewMode === 'all' && styles.chartToggleBtnActive]}
+              onPress={() => setChartViewMode('all')}
+            >
+              <Text style={[styles.chartToggleText, chartViewMode === 'all' && styles.chartToggleTextActive]}>
+                Comparar Todos
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.chartCard}>
+            <View style={styles.chartHeaderRow}>
+              <Text style={styles.chartTitle}>📊 Ingresos vs Gastos</Text>
+              {chartViewMode === 'single' && chartData.monthlyLabels.length > 1 && (
+                <View style={styles.chartNav}>
+                  <TouchableOpacity 
+                    style={[styles.chartNavBtn, currentChartIndex === 0 && styles.chartNavBtnDisabled]}
+                    onPress={() => setCurrentChartIndex(Math.max(0, currentChartIndex - 1))}
+                    disabled={currentChartIndex === 0}
+                  >
+                    <Text style={styles.chartNavText}>‹</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.chartNavMonth}>
+                    {chartData.monthlyLabels[currentChartIndex] || ''} {chartData.years[currentChartIndex] || ''}
+                  </Text>
+                  <TouchableOpacity 
+                    style={[styles.chartNavBtn, currentChartIndex >= chartData.monthlyLabels.length - 1 && styles.chartNavBtnDisabled]}
+                    onPress={() => setCurrentChartIndex(Math.min(chartData.monthlyLabels.length - 1, currentChartIndex + 1))}
+                    disabled={currentChartIndex >= chartData.monthlyLabels.length - 1}
+                  >
+                    <Text style={styles.chartNavText}>›</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+            <SimpleBarChart
+              labels={chartViewMode === 'all' ? chartData.monthlyLabels : [chartData.monthlyLabels[currentChartIndex] || '']}
+              years={chartViewMode === 'all' ? chartData.years : [chartData.years[currentChartIndex] || 0]}
+              incomeData={chartViewMode === 'all' ? chartData.incomeData : [chartData.incomeData[currentChartIndex] || 0]}
+              expenseData={chartViewMode === 'all' ? chartData.expenseData : [chartData.expenseData[currentChartIndex] || 0]}
+            />
+            <View style={styles.chartLegend}>
+              {chartViewMode === 'single' ? (
+                <>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#2196F3' }]} />
+                    <Text style={styles.legendText}>Ingresos: {formatCurrency(chartData.incomeData[currentChartIndex] || 0)}</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#E53935' }]} />
+                    <Text style={styles.legendText}>Gastos: {formatCurrency(chartData.expenseData[currentChartIndex] || 0)}</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#2196F3' }]} />
+                    <Text style={styles.legendText}>Total Ingresos: {formatCurrency(chartData.incomeData.reduce((a, b) => a + b, 0))}</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#E53935' }]} />
+                    <Text style={styles.legendText}>Total Gastos: {formatCurrency(chartData.expenseData.reduce((a, b) => a + b, 0))}</Text>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+
+          {chartData.categoryData.length > 0 && (
+            <View style={styles.chartCard}>
+              <Text style={styles.chartTitle}>🥧 Gastos por Categoría</Text>
+              <SimplePieChart data={chartData.categoryData} />
+            </View>
+          )}
+
+          {chartData.trendData.length > 1 && (
+            <View style={styles.chartCard}>
+              <View style={styles.chartHeaderRow}>
+                <Text style={styles.chartTitle}>📈 Tendencia de Balance</Text>
+                {chartViewMode === 'single' && chartData.monthlyLabels.length > 1 && (
+                  <View style={styles.chartNav}>
+                    <TouchableOpacity 
+                      style={[styles.chartNavBtn, currentChartIndex === 0 && styles.chartNavBtnDisabled]}
+                      onPress={() => setCurrentChartIndex(Math.max(0, currentChartIndex - 1))}
+                      disabled={currentChartIndex === 0}
+                    >
+                      <Text style={styles.chartNavText}>‹</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.chartNavMonth}>
+                      {chartData.monthlyLabels[currentChartIndex] || ''} {chartData.years[currentChartIndex] || ''}
+                    </Text>
+                    <TouchableOpacity 
+                      style={[styles.chartNavBtn, currentChartIndex >= chartData.monthlyLabels.length - 1 && styles.chartNavBtnDisabled]}
+                      onPress={() => setCurrentChartIndex(Math.min(chartData.monthlyLabels.length - 1, currentChartIndex + 1))}
+                      disabled={currentChartIndex >= chartData.monthlyLabels.length - 1}
+                    >
+                      <Text style={styles.chartNavText}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+              <SimpleLineChart
+                labels={chartViewMode === 'all' ? chartData.monthlyLabels : [chartData.monthlyLabels[currentChartIndex] || '']}
+                years={chartViewMode === 'all' ? chartData.years : [chartData.years[currentChartIndex] || 0]}
+                data={chartViewMode === 'all' ? chartData.trendData : [chartData.trendData[currentChartIndex] || 0]}
+              />
+            </View>
+          )}
+        </>
+      )}
     </View>
   );
 
@@ -408,9 +1074,11 @@ const StatisticsScreen: React.FC = () => {
   );
 
   const renderFinanceTab = () => {
-    const current = financePeriods.length > 0 ? financePeriods[0] : null;
+    const current = financePeriods.length > 0 ? financePeriods[financePeriods.length - 1] : null;
+    const isAllRange = timeRange === 'all';
+    const periodLabel = isAllRange ? 'Todos los períodos' : (current ? `${current.monthName} ${current.year}` : '');
     
-    if (!current) {
+    if (!current && !isAllRange) {
       return (
         <View style={styles.emptyState}>
           <Text style={styles.emptyEmoji}>💰</Text>
@@ -420,15 +1088,48 @@ const StatisticsScreen: React.FC = () => {
       );
     }
 
-    const totalIncome = current.income.reduce((sum, i) => sum + i.amount, 0);
-    const totalExpenses = current.expenses.reduce((sum, e) => sum + e.amount, 0);
-    const totalDebts = current.debts.reduce((sum, d) => sum + d.monthlyPayment, 0);
-    const activeDebts = current.debts.filter(d => !d.isPaid);
+    let totalIncome = 0, totalExpenses = 0, totalDebtRemaining = 0, totalDebtOriginal = 0, totalSavings = 0;
+    let activeDebts: FinanceDebt[] = [];
+    
+    if (isAllRange) {
+      const debtMap = new Map<string, { debt: FinanceDebt; remaining: number }>();
+      financePeriods.forEach((p) => {
+        totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
+        totalExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
+        totalSavings += p.savings || 0;
+        p.debts.forEach(d => {
+          if (!d.isPaid && !d.paidThisMonth) {
+            const key = `${d.name}_${d.remainingAmount}`;
+            if (!debtMap.has(key)) {
+              debtMap.set(key, { debt: d, remaining: d.remainingAmount });
+            }
+          }
+          if (!d.isPaid) {
+            totalDebtRemaining += d.remainingAmount;
+            totalDebtOriginal += d.totalAmount;
+          }
+        });
+      });
+      activeDebts = Array.from(debtMap.values())
+        .sort((a, b) => a.remaining - b.remaining)
+        .map(v => v.debt);
+    } else if (current) {
+      totalIncome = current.income.reduce((sum, i) => sum + i.amount, 0);
+      totalExpenses = current.expenses.reduce((sum, e) => sum + e.amount, 0);
+      totalSavings = current.savings || 0;
+      activeDebts = current.debts.filter(d => !d.isPaid && !d.paidThisMonth);
+      totalDebtRemaining = current.debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.remainingAmount, 0);
+      totalDebtOriginal = current.debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.totalAmount, 0);
+    }
+    
+    const totalDebts = activeDebts.reduce((sum, d) => sum + d.monthlyPayment, 0);
+    const totalPaid = totalDebtOriginal - totalDebtRemaining;
+    const monthsRemaining = totalDebts > 0 ? Math.ceil(totalDebtRemaining / totalDebts) : 0;
 
     return (
       <View style={styles.financeContainer}>
         <View style={styles.financeHeader}>
-          <Text style={styles.financeTitle}>{current.monthName} {current.year}</Text>
+          <Text style={styles.financeTitle}>{periodLabel}</Text>
         </View>
 
         <View style={styles.financeGrid}>
@@ -447,21 +1148,53 @@ const StatisticsScreen: React.FC = () => {
           <View style={[styles.financeCard, { borderLeftColor: '#FF9800' }]}>
             <Text style={styles.financeCardLabel}>Deuda Total</Text>
             <Text style={[styles.financeCardValue, { color: '#FF9800' }]}>
-              {formatCurrency(current.debts.reduce((sum, d) => sum + d.remainingAmount, 0))}
+              {formatCurrency(totalDebtRemaining)}
             </Text>
           </View>
           <View style={[styles.financeCard, { borderLeftColor: '#1565C0' }]}>
             <Text style={styles.financeCardLabel}>Ahorro</Text>
             <Text style={[styles.financeCardValue, { color: '#1565C0' }]}>
-              {formatCurrency(current.savings || 0)}
+              {formatCurrency(totalSavings)}
             </Text>
           </View>
         </View>
 
+        {totalDebtRemaining > 0 && (
+          <View style={styles.debtSummaryCard}>
+            <Text style={styles.debtSummaryTitle}>📊 Resumen de Deudas</Text>
+            <View style={styles.debtSummaryGrid}>
+              <View style={styles.debtSummaryItem}>
+                <Text style={styles.debtSummaryLabel}>Total Deuda</Text>
+                <Text style={styles.debtSummaryValue}>{formatCurrency(totalDebtOriginal)}</Text>
+              </View>
+              <View style={styles.debtSummaryItem}>
+                <Text style={styles.debtSummaryLabel}>Ya Pagado</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#43A047' }]}>{formatCurrency(totalPaid)}</Text>
+              </View>
+              <View style={styles.debtSummaryItem}>
+                <Text style={styles.debtSummaryLabel}>Restante</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#FF9800' }]}>{formatCurrency(totalDebtRemaining)}</Text>
+              </View>
+              <View style={styles.debtSummaryItem}>
+                <Text style={styles.debtSummaryLabel}>Cuota Mensual</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#1565C0' }]}>{formatCurrency(totalDebts)}</Text>
+              </View>
+            </View>
+            <View style={styles.debtProgressContainer}>
+              <View style={styles.debtProgressBar}>
+                <View style={[styles.debtProgressFill, { width: `${(totalPaid / totalDebtOriginal) * 100}%` }]} />
+              </View>
+              <Text style={styles.debtProgressText}>
+                {Math.round((totalPaid / totalDebtOriginal) * 100)}% pagado • {monthsRemaining} meses restantes
+              </Text>
+            </View>
+          </View>
+        )}
+
         {activeDebts.length > 0 && (
           <View style={styles.debtsCard}>
             <Text style={styles.debtsTitle}>🏦 Estado de Deudas ({activeDebts.length})</Text>
-            {current.debts.filter(d => !d.isPaid).map((debt, index) => (
+            {activeDebts.map((debt, index) => (
               <View key={debt.id || index} style={styles.debtRow}>
                 <View style={styles.debtInfo}>
                   <Text style={styles.debtName}>{debt.name}</Text>
@@ -485,7 +1218,7 @@ const StatisticsScreen: React.FC = () => {
           </View>
         )}
 
-        {activeDebts.length === 0 && current.debts.length === 0 && (
+        {activeDebts.length === 0 && (isAllRange || (current && current.debts.length === 0)) && (
           <View style={styles.emptyDebts}>
             <Text style={styles.emptyDebtsEmoji}>✅</Text>
             <Text style={styles.emptyDebtsText}>No tienes deudas registradas</Text>
@@ -498,18 +1231,12 @@ const StatisticsScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
-      <View style={styles.header}>
-        <View style={styles.statusBarSpacer} />
-        <View style={styles.headerContent}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.backButtonText}>‹</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>📊 Dashboard</Text>
-        </View>
-      </View>
+      <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
+        <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+          <Text style={styles.headerTitle}>📊 Estadísticas</Text>
+          <Text style={styles.headerSubtitle}>Resumen de tus finanzas</Text>
+        </SafeAreaView>
+      </LinearGradient>
 
       <View style={styles.tabContainer}>
         {[
@@ -610,37 +1337,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    backgroundColor: colors.header.background,
-    paddingTop: 8,
+    paddingBottom: 20,
   },
-  headerContent: {
-    paddingBottom: 15,
+  headerSafeArea: {
     paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusBarSpacer: {
-    height: StatusBar.currentHeight || 0,
+    paddingTop: 8,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.header.text,
-    marginLeft: 10,
+    color: colors.common.white,
   },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: colors.header.text,
-    fontWeight: 'bold',
-    marginTop: -2,
+  headerSubtitle: {
+    fontSize: 14,
+    color: colors.common.white,
+    opacity: 0.9,
+    marginTop: 2,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -1038,6 +1750,63 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 4,
   },
+  debtSummaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 2,
+    borderColor: '#FF9800',
+  },
+  debtSummaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  debtSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  debtSummaryItem: {
+    width: '48%',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  debtSummaryLabel: {
+    fontSize: 11,
+    color: '#666',
+    marginBottom: 2,
+  },
+  debtSummaryValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  debtProgressContainer: {
+    marginTop: 8,
+  },
+  debtProgressBar: {
+    height: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  debtProgressFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 6,
+  },
+  debtProgressText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '600',
+  },
   debtsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -1144,6 +1913,102 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
+  },
+  chartCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  chartTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  chartHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  chartNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chartNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartNavBtnDisabled: {
+    opacity: 0.4,
+  },
+  chartNavText: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+  },
+  chartNavMonth: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginHorizontal: 8,
+    minWidth: 60,
+    textAlign: 'center',
+  },
+  chartViewToggle: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  chartToggleBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#e0e0e0',
+  },
+  chartToggleBtnActive: {
+    backgroundColor: colors.primary.main,
+  },
+  chartToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  chartToggleTextActive: {
+    color: '#fff',
+  },
+  chart: {
+    borderRadius: 12,
+  },
+  chartLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 20,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 6,
+  },
+  legendText: {
+    fontSize: 13,
+    color: '#666',
   },
 });
 

@@ -5,9 +5,12 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFonts } from 'expo-font';
 
 import { colors } from '../theme/colors';
 import ExpensesScreen from '../screens/ExpensesScreen';
+import FinancesTabScreen from '../screens/FinancesTabScreen';
+import FinanceDetailScreen from '../screens/FinanceDetailScreen';
 import StatisticsScreen from '../screens/StatisticsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ExpenseDetailScreen from '../screens/ExpenseDetailScreen';
@@ -19,11 +22,13 @@ export type RootStackParamList = {
   Welcome: undefined;
   MainTabs: undefined;
   ExpenseDetail: { periodId: string };
+  FinanceDetail: { periodId: string };
   FloorsConfig: undefined;
 };
 
 export type TabParamList = {
   Gastos: undefined;
+  Finanzas: undefined;
   Estadísticas: undefined;
   Perfil: undefined;
 };
@@ -63,6 +68,15 @@ const MainTabs = () => {
         component={ExpensesScreen}
         options={{
           tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'flash' : 'flash-outline'} focused={focused} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Finanzas"
+        component={FinancesTabScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
             <TabIcon name={focused ? 'wallet' : 'wallet-outline'} focused={focused} />
           ),
         }}
@@ -91,6 +105,9 @@ const MainTabs = () => {
 
 const RootNavigator = () => {
   const [hasGroup, setHasGroup] = useState<boolean | null>(null);
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+  });
 
   useEffect(() => {
     const checkGroup = async () => {
@@ -127,6 +144,11 @@ const RootNavigator = () => {
         name="ExpenseDetail"
         component={ExpenseDetailScreen}
         options={{ title: 'Detalle de Gasto' }}
+      />
+      <Stack.Screen
+        name="FinanceDetail"
+        component={FinanceDetailScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="FloorsConfig"

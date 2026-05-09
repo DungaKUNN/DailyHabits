@@ -12,7 +12,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   PaymentReminderSettings,
   getDefaultPaymentReminderSettings,
@@ -20,6 +20,7 @@ import {
   savePaymentReminderSettings,
   schedulePaymentReminders,
   cancelPaymentReminders,
+  requestNotificationPermissions,
 } from '../../services/NotificationService';
 import {
   getPremiumStatus,
@@ -34,7 +35,6 @@ type ProfileNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<ProfileNavigationProp>();
-  const insets = useSafeAreaInsets();
   const [paymentSettings, setPaymentSettings] = useState<PaymentReminderSettings>(
     getDefaultPaymentReminderSettings()
   );
@@ -51,7 +51,7 @@ const ProfileScreen: React.FC = () => {
     setPaymentSettings(payment);
     setIsPremium(premium);
     setLoading(false);
-};
+  };
 
   const handleBuyPremium = () => {
     Alert.alert(
@@ -95,32 +95,6 @@ const ProfileScreen: React.FC = () => {
         },
       ]
     );
-  };
-
-  const toggleMealReminders = async (enabled: boolean) => {
-    if (enabled) {
-      const granted = await requestNotificationPermissions();
-      if (!granted) {
-        Alert.alert(
-          'Permisos necesarios',
-          'Activa las notificaciones en configuración de tu teléfono.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-    }
-    const newSettings = { ...mealSettings, enabled };
-    setMealSettings(newSettings);
-    await saveNotificationSettings(newSettings);
-  };
-
-  const updateMealSetting = async <K extends keyof NotificationSettings>(
-    key: K,
-    value: NotificationSettings[K]
-  ) => {
-    const newSettings = { ...mealSettings, [key]: value };
-    setMealSettings(newSettings);
-    await saveNotificationSettings(newSettings);
   };
 
   const togglePaymentReminders = async (enabled: boolean) => {
@@ -184,6 +158,22 @@ const ProfileScreen: React.FC = () => {
     }
   };
 
+  const updateMinute = async (minute: number) => {
+    const newSettings = { ...paymentSettings, minute };
+    setPaymentSettings(newSettings);
+    await savePaymentReminderSettings(newSettings);
+
+    if (newSettings.enabled) {
+      await schedulePaymentReminders();
+    }
+  };
+
+  const formatTime = (hour: number, minute: number) => {
+    const period = hour < 12 ? 'AM' : 'PM';
+    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+    return `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`;
+  };
+
   const getDaysText = () => {
     const { days } = paymentSettings;
     if (days.length === 1) return `día ${days[0]}`;
@@ -202,46 +192,30 @@ const ProfileScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <LinearGradient
-        colors={['#1565C0', '#2196F3']}
-        style={styles.header}
-      >
-        <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>U</Text>
+      <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
+        <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+          <View style={styles.headerContent}>
+            <View style={styles.avatarContainer}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>U</Text>
+              </View>
+            </View>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Mi Perfil</Text>
+              <Text style={styles.headerSubtitle}>Configura tus preferencias</Text>
+            </View>
           </View>
-        </View>
-        <Text style={styles.headerTitle}>Mi Perfil</Text>
-        <Text style={styles.headerSubtitle}>Configura tus preferencias</Text>
+        </SafeAreaView>
       </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <SafeAreaView style={styles.contentContainer} edges={['bottom']}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💡 Luz y Agua</Text>
+          <Text style={styles.sectionTitle}>⚡ Luz y Agua</Text>
           <Text style={styles.sectionDescription}>
             Gestiona los servicios de tu hogar
           </Text>
           
-          <TouchableOpacity 
-            style={styles.utilityButton}
-            onPress={() => navigation.navigate('Expenses')}
-          >
-            <LinearGradient
-              colors={['#FFC107', '#FF9800']}
-              style={styles.utilityButtonGradient}
-            >
-              <Text style={styles.utilityButtonIcon}>⚡</Text>
-              <View style={styles.utilityButtonContent}>
-                <Text style={styles.utilityButtonTitle}>Ver Gastos</Text>
-                <Text style={styles.utilityButtonSubtitle}>
-                  Listado de meses
-                </Text>
-              </View>
-              <Text style={styles.utilityButtonArrow}>›</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
           <TouchableOpacity 
             style={styles.utilityButton}
             onPress={() => navigation.navigate('FloorsConfig')}
@@ -260,34 +234,10 @@ const ProfileScreen: React.FC = () => {
               <Text style={styles.utilityButtonArrow}>›</Text>
             </LinearGradient>
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💰 Finanzas Personales</Text>
-          <Text style={styles.sectionDescription}>
-            Controla tus ingresos, gastos, deudas y ahorros
-          </Text>
           
-          <TouchableOpacity 
-            style={styles.financeButton}
-            onPress={() => navigation.navigate('Statistics')}
-          >
-            <LinearGradient
-              colors={['#1A237E', '#303F9F']}
-              style={styles.financeButtonGradient}
-            >
-              <Text style={styles.financeButtonIcon}>📊</Text>
-              <View style={styles.financeButtonContent}>
-                <Text style={styles.financeButtonTitle}>Estadísticas</Text>
-                <Text style={styles.financeButtonSubtitle}>
-                  Ver gráficos y análisis
-                </Text>
-              </View>
-              <Text style={styles.financeButtonArrow}>›</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+          <Text style={styles.tabHint}>
+            💡 Para ver Gastos, usa la pestaña inferior
+          </Text>
         </View>
 
         <View style={styles.divider} />
@@ -376,70 +326,21 @@ const ProfileScreen: React.FC = () => {
                 Selecciona los días del mes
               </Text>
 
-              <View style={styles.daysGrid}>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((day) => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.dayButton,
-                      paymentSettings.days.includes(day) && styles.dayButtonActive,
-                    ]}
-                    onPress={() => toggleDay(day)}
-                  >
-                    <Text
-                      style={[
-                        styles.dayButtonText,
-                        paymentSettings.days.includes(day) && styles.dayButtonTextActive,
-                      ]}
+              <View style={styles.calendarGrid}>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
+                  const isSelected = paymentSettings.days.includes(day);
+                  return (
+                    <TouchableOpacity
+                      key={`day-${day}`}
+                      style={[styles.calendarDay, isSelected && styles.calendarDayActive]}
+                      onPress={() => toggleDay(day)}
                     >
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={styles.daysGrid}>
-                {[11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((day) => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.dayButton,
-                      paymentSettings.days.includes(day) && styles.dayButtonActive,
-                    ]}
-                    onPress={() => toggleDay(day)}
-                  >
-                    <Text
-                      style={[
-                        styles.dayButtonText,
-                        paymentSettings.days.includes(day) && styles.dayButtonTextActive,
-                      ]}
-                    >
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={styles.daysGrid}>
-                {[21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].map((day) => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.dayButton,
-                      paymentSettings.days.includes(day) && styles.dayButtonActive,
-                    ]}
-                    onPress={() => toggleDay(day)}
-                  >
-                    <Text
-                      style={[
-                        styles.dayButtonText,
-                        paymentSettings.days.includes(day) && styles.dayButtonTextActive,
-                      ]}
-                    >
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text style={[styles.calendarDayText, isSelected && styles.calendarDayTextActive]}>
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <View style={styles.selectedDaysInfo}>
@@ -462,10 +363,7 @@ const ProfileScreen: React.FC = () => {
 
                 <View style={styles.hourDisplay}>
                   <Text style={styles.hourText}>
-                    {paymentSettings.hour.toString().padStart(2, '0')}:00
-                  </Text>
-                  <Text style={styles.hourPeriod}>
-                    {paymentSettings.hour < 12 ? 'AM' : 'PM'}
+                    {formatTime(paymentSettings.hour, paymentSettings.minute)}
                   </Text>
                 </View>
 
@@ -477,23 +375,22 @@ const ProfileScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.quickHours}>
-                {[8, 9, 10, 12, 18].map((h) => (
+              <Text style={styles.minuteLabel}>Minutos</Text>
+              <View style={styles.minuteGrid}>
+                {[0, 15, 30, 45].map((m) => (
                   <TouchableOpacity
-                    key={h}
+                    key={m}
                     style={[
-                      styles.quickHourButton,
-                      paymentSettings.hour === h && styles.quickHourButtonActive,
+                      styles.minuteButton,
+                      paymentSettings.minute === m && styles.minuteButtonActive,
                     ]}
-                    onPress={() => updateHour(h)}
+                    onPress={() => updateMinute(m)}
                   >
-                    <Text
-                      style={[
-                        styles.quickHourText,
-                        paymentSettings.hour === h && styles.quickHourTextActive,
-                      ]}
-                    >
-                      {h}:00
+                    <Text style={[
+                      styles.minuteButtonText,
+                      paymentSettings.minute === m && styles.minuteButtonTextActive,
+                    ]}>
+                      :{m.toString().padStart(2, '0')}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -505,7 +402,7 @@ const ProfileScreen: React.FC = () => {
               <View style={styles.infoContent}>
                 <Text style={styles.infoTitle}>Resumen</Text>
                 <Text style={styles.infoText}>
-                  Recordatorios los {getDaysText()} de cada mes a las {paymentSettings.hour}:00 hrs.
+                  Recordatorios los {getDaysText()} de cada mes a las {formatTime(paymentSettings.hour, paymentSettings.minute)} hrs.
                 </Text>
               </View>
             </View>
@@ -534,18 +431,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  safeArea: {
+  contentContainer: {
     flex: 1,
     backgroundColor: colors.background,
   },
   header: {
-    paddingBottom: 24,
+    paddingBottom: 20,
+  },
+  headerSafeArea: {
     paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  headerContent: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.header.background,
   },
   avatarContainer: {
-    marginBottom: 12,
+    marginRight: 16,
   },
   avatar: {
     width: 70,
@@ -566,6 +468,9 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.header.text,
+  },
+  headerTextContainer: {
+    flex: 1,
   },
   headerSubtitle: {
     fontSize: 14,
@@ -589,9 +494,11 @@ const styles = StyleSheet.create({
     padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary.main,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -614,6 +521,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  tabHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 12,
+    fontStyle: 'italic',
   },
   card: {
     backgroundColor: colors.card,
@@ -726,6 +640,51 @@ const styles = StyleSheet.create({
   dayButtonTextActive: {
     color: '#fff',
   },
+  calendarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  calendarHeaderText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#999',
+    width: 40,
+    textAlign: 'center',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+  },
+  calendarEmpty: {
+    width: 40,
+    height: 36,
+    margin: 2,
+  },
+  calendarDay: {
+    width: 40,
+    height: 36,
+    margin: 2,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarDayActive: {
+    backgroundColor: '#FF9800',
+  },
+  calendarDayText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  calendarDayTextActive: {
+    color: '#fff',
+  },
   selectedDaysInfo: {
     marginTop: 10,
     paddingVertical: 8,
@@ -792,6 +751,37 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   quickHourTextActive: {
+    color: '#fff',
+  },
+  minuteLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  minuteGrid: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  minuteButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  minuteButtonActive: {
+    backgroundColor: '#FF9800',
+  },
+  minuteButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  minuteButtonTextActive: {
     color: '#fff',
   },
   infoCard: {
