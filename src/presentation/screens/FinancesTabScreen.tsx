@@ -33,6 +33,14 @@ const FinancesTabScreen: React.FC = () => {
     try {
       const repo = new SQLiteFinanceRepository(getDatabase());
       const periods = await repo.getAllPeriods();
+      console.log('======= loadFinanceData =======');
+      console.log('Total periods loaded:', periods.length);
+      periods.forEach((p, idx) => {
+        const totalIncome = p.income.reduce((sum, i) => sum + i.amount, 0);
+        const totalExpenses = p.expenses.reduce((sum, e) => sum + e.amount, 0);
+        console.log(`Period[${idx}]: ${p.month} ${p.year} - Income: ${totalIncome}, Expenses: ${totalExpenses}, Debts: ${p.debts.length}`);
+      });
+      console.log('======= FIN loadFinanceData =======');
       setFinancePeriods(periods);
     } catch (error) {
       console.error('Error loading finance data:', error);
@@ -84,6 +92,10 @@ const FinancesTabScreen: React.FC = () => {
         notes: '',
       });
       
+      console.log('======= createPeriod =======');
+      console.log('Created new period:', newPeriod.month, newPeriod.year);
+      console.log('======= FIN createPeriod =======');
+      
       const allPeriods = await repo.getAllPeriods();
       
       const debtsToCopy: typeof newPeriod.debts = [];
@@ -129,7 +141,7 @@ const FinancesTabScreen: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
+  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const getTotals = (period: FinancePeriod) => {
     const totalIncome = period.income.reduce((sum, i) => sum + i.amount, 0);

@@ -669,7 +669,7 @@ const ExpenseDetailScreen: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
+  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) {
     return (

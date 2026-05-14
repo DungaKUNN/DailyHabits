@@ -98,6 +98,25 @@ const StatisticsScreen: React.FC = () => {
     trendData: [],
   });
   
+  useEffect(() => {
+    setCurrentChartIndex(0);
+    if (chartViewMode === 'all') {
+      console.log('===== MODO TODOS LOS PERIODOS (chartViewMode) =====');
+      console.log('monthlyLabels:', JSON.stringify(chartData.monthlyLabels));
+      console.log('years:', JSON.stringify(chartData.years));
+      console.log('incomeData:', JSON.stringify(chartData.incomeData));
+      console.log('expenseData:', JSON.stringify(chartData.expenseData));
+      console.log('trendData:', JSON.stringify(chartData.trendData));
+      console.log('categoryData:', JSON.stringify(chartData.categoryData));
+      const totalIncome = chartData.incomeData.reduce((a, b) => a + b, 0);
+      const totalExpenses = chartData.expenseData.reduce((a, b) => a + b, 0);
+      console.log('Total income (sum):', totalIncome);
+      console.log('Total expenses (sum):', totalExpenses);
+      console.log('Net balance:', totalIncome - totalExpenses);
+      console.log('===== FIN MODO TODOS LOS PERIODOS =====');
+    }
+  }, [chartViewMode]);
+  
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -115,22 +134,34 @@ const StatisticsScreen: React.FC = () => {
   );
 
   const loadAllData = async () => {
+    console.log('loadAllData called, timeRange:', timeRange, 'selectedMonth:', selectedMonth, 'selectedYear:', selectedYear);
     setCurrentChartIndex(0);
     await Promise.all([
       loadSummaryData(),
       loadExpenseData(),
     ]);
+    
+    const repo = new SQLiteFinanceRepository(getDatabase());
+    const allPeriods = await repo.getAllPeriods();
+    console.log('All periods count:', allPeriods.length);
+    
     if (timeRange === 'month') {
-      const repo = new SQLiteFinanceRepository(getDatabase());
-      const allPeriods = await repo.getAllPeriods();
       const sortedPeriods = [...allPeriods].sort((a, b) => {
         const monthA = parseInt(a.month.split('-')[1]);
         const monthB = parseInt(b.month.split('-')[1]);
         return monthB - monthA;
       });
       const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
+      console.log('Looking for month:', monthStr);
       const index = sortedPeriods.findIndex(p => p.year === selectedYear && parseInt(p.month.split('-')[1]) === selectedMonth + 1);
+      console.log('Found index:', index);
       if (index >= 0) setCurrentChartIndex(index);
+    } else {
+      if (allPeriods.length > 0) {
+        const newIndex = allPeriods.length - 1;
+        console.log('Setting chart index to:', newIndex);
+        setCurrentChartIndex(newIndex);
+      }
     }
   };
 
@@ -162,6 +193,21 @@ const StatisticsScreen: React.FC = () => {
         chartPeriods = sortedPeriods;
         filteredPeriods = sortedPeriods;
         monthLabel = 'Todos los períodos';
+        
+        console.log('======= TODOS LOS PERIODOS (timeRange=all) =======');
+        console.log('Total periods from DB:', allPeriods.length);
+        allPeriods.forEach((p, idx) => {
+          const totalIncome = p.income.reduce((sum, i) => sum + i.amount, 0);
+          const totalExpenses = p.expenses.reduce((sum, e) => sum + e.amount, 0);
+          console.log(`Period[${idx}]: ${p.month} (${p.monthName}) - Income: ${totalIncome}, Expenses: ${totalExpenses}`);
+          if (p.income.length > 0) {
+            console.log('  Income items:', JSON.stringify(p.income.map(i => ({ source: i.source, amount: i.amount }))));
+          }
+          if (p.expenses.length > 0) {
+            console.log('  Expense items:', JSON.stringify(p.expenses.map(e => ({ category: e.category, amount: e.amount }))));
+          }
+        });
+        console.log('======= FIN TODOS LOS PERIODOS =======');
       }
       
       setFinancePeriods(filteredPeriods);
@@ -206,28 +252,69 @@ const StatisticsScreen: React.FC = () => {
         trendData,
       });
 
-      if (filteredPeriods.length > 0) {
+      let totalIncome = 0;
+      let totalExpenses = 0;
+      let totalSavings = 0;
+      let totalDebts = 0;
+      let paidDebts = 0;
+      let incomeChange = 0;
+      let expensesChange = 0;
+      
+      if (timeRange === 'all') {
+        console.log('======= CALCULO DE DEUDAS EN MODO ALL =======');
+        
+        // Usar Map para evitar duplicación de deudas - usar el período más reciente
+        const uniqueDebts = new Map<string, { monthlyPayment: number, remainingAmount: number, isPaid: boolean, periodIndex: number }>();
+        
+        filteredPeriods.forEach((p, periodIndex) => {
+          totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
+          totalExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
+          totalSavings += p.savings || 0;
+          
+          console.log(`Period ${p.month} ${p.year}: debts count = ${p.debts.length}`);
+          p.debts.forEach(d => {
+            const key = `${d.name}_${d.totalAmount}`;
+            const existing = uniqueDebts.get(key);
+            
+            // Solo guardar la deuda del período más reciente (mayor periodIndex)
+            if (!existing || periodIndex > existing.periodIndex) {
+              uniqueDebts.set(key, {
+                monthlyPayment: d.monthlyPayment,
+                remainingAmount: d.remainingAmount,
+                isPaid: d.isPaid,
+                periodIndex: periodIndex
+              });
+            }
+          });
+        });
+        
+        console.log('Unique debts:', JSON.stringify(Array.from(uniqueDebts.entries()).map(([k, v]) => ({ key: k, remainingAmount: v.remainingAmount, isPaid: v.isPaid, periodIndex: v.periodIndex }))));
+        
+        uniqueDebts.forEach((d, key) => {
+          console.log(`Debt ${key}: monthlyPayment=${d.monthlyPayment}, remainingAmount=${d.remainingAmount}, isPaid=${d.isPaid}, periodIndex=${d.periodIndex}`);
+          if (!d.isPaid && d.remainingAmount > 0) {
+            totalDebts += d.monthlyPayment;
+          }
+          if (d.isPaid) {
+            paidDebts += d.monthlyPayment;
+          }
+        });
+        
+        console.log('totalDebts calculated:', totalDebts, 'paidDebts calculated:', paidDebts);
+        console.log('======= FIN CALCULO DE DEUDAS =======');
+      } else if (filteredPeriods.length > 0) {
         const current = filteredPeriods[0];
         const previous = filteredPeriods.length > 1 ? filteredPeriods[1] : null;
 
-        const totalIncome = current.income.reduce((sum, i) => sum + i.amount, 0);
-        
-        const totalExpenses = current.expenses.reduce((sum, e) => sum + e.amount, 0);
-        
-        const totalDebts = current.debts
+        totalIncome = current.income.reduce((sum, i) => sum + i.amount, 0);
+        totalExpenses = current.expenses.reduce((sum, e) => sum + e.amount, 0);
+        totalDebts = current.debts
           .filter(d => !d.isPaid && !d.paidThisMonth)
           .reduce((sum, d) => sum + d.monthlyPayment, 0);
-        
-        const paidDebts = current.debts
+        paidDebts = current.debts
           .filter(d => d.isPaid || d.paidThisMonth)
           .reduce((sum, d) => sum + d.monthlyPayment, 0);
-        
-        const totalWithDebts = totalExpenses + totalDebts + paidDebts;
-        
-        const totalSavings = current.savings || 0;
-
-        let incomeChange = 0;
-        let expensesChange = 0;
+        totalSavings = current.savings || 0;
 
         if (previous) {
           const prevIncome = previous.income.reduce((sum, i) => sum + i.amount, 0);
@@ -236,29 +323,32 @@ const StatisticsScreen: React.FC = () => {
             .filter(d => d.isPaid || d.paidThisMonth)
             .reduce((sum, d) => sum + d.monthlyPayment, 0);
           const prevTotalWithDebts = prevExpenses + prevPaidDebts;
+          const currentTotalWithDebts = totalExpenses + totalDebts + paidDebts;
           
           if (prevIncome > 0) {
             incomeChange = ((totalIncome - prevIncome) / prevIncome) * 100;
           }
           if (prevTotalWithDebts > 0) {
-            expensesChange = ((totalWithDebts - prevTotalWithDebts) / prevTotalWithDebts) * 100;
+            expensesChange = ((currentTotalWithDebts - prevTotalWithDebts) / prevTotalWithDebts) * 100;
           }
         }
-
-        const savingsRate = totalIncome > 0 
-          ? Math.round(((totalIncome - totalWithDebts) / totalIncome) * 100) 
-          : 0;
-
-        setSummaryStats({
-          totalIncome,
-          totalExpenses: totalWithDebts,
-          totalSavings,
-          totalDebts,
-          savingsRate,
-          incomeChange,
-          expensesChange,
-        });
       }
+      
+      const totalWithDebts = totalExpenses + totalDebts + paidDebts;
+
+      const savingsRate = totalIncome > 0 
+        ? Math.round(((totalIncome - totalWithDebts) / totalIncome) * 100) 
+        : 0;
+
+      setSummaryStats({
+        totalIncome,
+        totalExpenses: totalWithDebts,
+        totalSavings,
+        totalDebts,
+        savingsRate,
+        incomeChange,
+        expensesChange,
+      });
     } catch (error) {
       console.error('Error loading summary:', error);
     }
@@ -319,7 +409,7 @@ const StatisticsScreen: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
+  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatPercent = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)}%`;
 
   const SimpleBarChart: React.FC<{
@@ -932,7 +1022,7 @@ const StatisticsScreen: React.FC = () => {
                     <Text style={styles.chartNavText}>‹</Text>
                   </TouchableOpacity>
                   <Text style={styles.chartNavMonth}>
-                    {chartData.monthlyLabels[currentChartIndex] || ''} {chartData.years[currentChartIndex] || ''}
+                    {chartData.monthlyLabels.length > 0 ? chartData.monthlyLabels[Math.min(currentChartIndex, chartData.monthlyLabels.length - 1)] : ''} {chartData.years.length > 0 ? chartData.years[Math.min(currentChartIndex, chartData.years.length - 1)] : ''}
                   </Text>
                   <TouchableOpacity 
                     style={[styles.chartNavBtn, currentChartIndex >= chartData.monthlyLabels.length - 1 && styles.chartNavBtnDisabled]}
@@ -944,22 +1034,39 @@ const StatisticsScreen: React.FC = () => {
                 </View>
               )}
             </View>
-            <SimpleBarChart
-              labels={chartViewMode === 'all' ? chartData.monthlyLabels : [chartData.monthlyLabels[currentChartIndex] || '']}
-              years={chartViewMode === 'all' ? chartData.years : [chartData.years[currentChartIndex] || 0]}
-              incomeData={chartViewMode === 'all' ? chartData.incomeData : [chartData.incomeData[currentChartIndex] || 0]}
-              expenseData={chartViewMode === 'all' ? chartData.expenseData : [chartData.expenseData[currentChartIndex] || 0]}
-            />
+            {(() => {
+              const safeIndex = chartData.monthlyLabels.length > 0 ? Math.min(currentChartIndex, chartData.monthlyLabels.length - 1) : 0;
+              const chartLabels = chartViewMode === 'all' 
+                ? chartData.monthlyLabels 
+                : (chartData.monthlyLabels.length > 0 ? [chartData.monthlyLabels[safeIndex]] : ['']);
+              const chartYears = chartViewMode === 'all'
+                ? chartData.years
+                : (chartData.years.length > 0 ? [chartData.years[safeIndex]] : [0]);
+              const chartIncomeData = chartViewMode === 'all'
+                ? chartData.incomeData
+                : (chartData.incomeData.length > 0 ? [chartData.incomeData[safeIndex]] : [0]);
+              const chartExpenseData = chartViewMode === 'all'
+                ? chartData.expenseData
+                : (chartData.expenseData.length > 0 ? [chartData.expenseData[safeIndex]] : [0]);
+              return (
+                <SimpleBarChart
+                  labels={chartLabels}
+                  years={chartYears}
+                  incomeData={chartIncomeData}
+                  expenseData={chartExpenseData}
+                />
+              );
+            })()}
             <View style={styles.chartLegend}>
               {chartViewMode === 'single' ? (
                 <>
                   <View style={styles.legendItem}>
                     <View style={[styles.legendDot, { backgroundColor: '#2196F3' }]} />
-                    <Text style={styles.legendText}>Ingresos: {formatCurrency(chartData.incomeData[currentChartIndex] || 0)}</Text>
+                    <Text style={styles.legendText}>Ingresos: {formatCurrency(chartData.incomeData.length > 0 ? chartData.incomeData[Math.min(currentChartIndex, chartData.incomeData.length - 1)] : 0)}</Text>
                   </View>
                   <View style={styles.legendItem}>
                     <View style={[styles.legendDot, { backgroundColor: '#E53935' }]} />
-                    <Text style={styles.legendText}>Gastos: {formatCurrency(chartData.expenseData[currentChartIndex] || 0)}</Text>
+                    <Text style={styles.legendText}>Gastos: {formatCurrency(chartData.expenseData.length > 0 ? chartData.expenseData[Math.min(currentChartIndex, chartData.expenseData.length - 1)] : 0)}</Text>
                   </View>
                 </>
               ) : (
@@ -998,7 +1105,7 @@ const StatisticsScreen: React.FC = () => {
                       <Text style={styles.chartNavText}>‹</Text>
                     </TouchableOpacity>
                     <Text style={styles.chartNavMonth}>
-                      {chartData.monthlyLabels[currentChartIndex] || ''} {chartData.years[currentChartIndex] || ''}
+                      {chartData.monthlyLabels.length > 0 ? chartData.monthlyLabels[Math.min(currentChartIndex, chartData.monthlyLabels.length - 1)] : ''} {chartData.years.length > 0 ? chartData.years[Math.min(currentChartIndex, chartData.years.length - 1)] : ''}
                     </Text>
                     <TouchableOpacity 
                       style={[styles.chartNavBtn, currentChartIndex >= chartData.monthlyLabels.length - 1 && styles.chartNavBtnDisabled]}
@@ -1010,11 +1117,25 @@ const StatisticsScreen: React.FC = () => {
                   </View>
                 )}
               </View>
-              <SimpleLineChart
-                labels={chartViewMode === 'all' ? chartData.monthlyLabels : [chartData.monthlyLabels[currentChartIndex] || '']}
-                years={chartViewMode === 'all' ? chartData.years : [chartData.years[currentChartIndex] || 0]}
-                data={chartViewMode === 'all' ? chartData.trendData : [chartData.trendData[currentChartIndex] || 0]}
-              />
+              {(() => {
+                const safeIndex2 = chartData.monthlyLabels.length > 0 ? Math.min(currentChartIndex, chartData.monthlyLabels.length - 1) : 0;
+                const lineLabels = chartViewMode === 'all' 
+                  ? chartData.monthlyLabels 
+                  : (chartData.monthlyLabels.length > 0 ? [chartData.monthlyLabels[safeIndex2]] : ['']);
+                const lineYears = chartViewMode === 'all'
+                  ? chartData.years
+                  : (chartData.years.length > 0 ? [chartData.years[safeIndex2]] : [0]);
+                const lineData = chartViewMode === 'all'
+                  ? chartData.trendData
+                  : (chartData.trendData.length > 0 ? [chartData.trendData[safeIndex2]] : [0]);
+                return (
+                  <SimpleLineChart
+                    labels={lineLabels}
+                    years={lineYears}
+                    data={lineData}
+                  />
+                );
+              })()}
             </View>
           )}
         </>
@@ -1092,25 +1213,42 @@ const StatisticsScreen: React.FC = () => {
     let activeDebts: FinanceDebt[] = [];
     
     if (isAllRange) {
-      const debtMap = new Map<string, { debt: FinanceDebt; remaining: number }>();
-      financePeriods.forEach((p) => {
+      console.log('======= ESTADO DE DEUDAS (isAllRange) =======');
+      const debtMap = new Map<string, { debt: FinanceDebt; remaining: number; periodIndex: number }>();
+      financePeriods.forEach((p, periodIndex) => {
         totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
         totalExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
         totalSavings += p.savings || 0;
         p.debts.forEach(d => {
-          if (!d.isPaid && !d.paidThisMonth) {
-            const key = `${d.name}_${d.remainingAmount}`;
-            if (!debtMap.has(key)) {
-              debtMap.set(key, { debt: d, remaining: d.remainingAmount });
-            }
-          }
-          if (!d.isPaid) {
-            totalDebtRemaining += d.remainingAmount;
-            totalDebtOriginal += d.totalAmount;
+          const key = `${d.name}_${d.totalAmount}`;
+          const existing = debtMap.get(key);
+          
+          // Usar la deuda del período más reciente (mayor periodIndex)
+          if (!existing || periodIndex > existing.periodIndex) {
+            debtMap.set(key, { debt: d, remaining: d.remainingAmount, periodIndex: periodIndex });
           }
         });
       });
-      activeDebts = Array.from(debtMap.values())
+      
+      console.log('Debt map entries:', JSON.stringify(Array.from(debtMap.entries()).map(([k, v]) => ({ key: k, remaining: v.remaining, isPaid: v.debt.isPaid, periodIndex: v.periodIndex }))));
+      
+      // Calcular totalDebtRemaining y totalDebtOriginal solo con debts únicas del período más reciente
+      let uniqueDebts: { debt: FinanceDebt; remaining: number }[] = [];
+      debtMap.forEach((value) => {
+        uniqueDebts.push({ debt: value.debt, remaining: value.remaining });
+        // totalDebtOriginal siempre incluye el monto original (ya pagado o no)
+        totalDebtOriginal += value.debt.totalAmount;
+        // totalDebtRemaining solo incluye las deudas no pagadas
+        if (!value.debt.isPaid) {
+          totalDebtRemaining += value.debt.remainingAmount;
+          
+        }
+      });
+      
+      console.log('totalDebtRemaining:', totalDebtRemaining, 'totalDebtOriginal:', totalDebtOriginal);
+      console.log('======= FIN ESTADO DE DEUDAS =======');
+      
+      activeDebts = uniqueDebts
         .sort((a, b) => a.remaining - b.remaining)
         .map(v => v.debt);
     } else if (current) {
@@ -1198,9 +1336,15 @@ const StatisticsScreen: React.FC = () => {
               <View key={debt.id || index} style={styles.debtRow}>
                 <View style={styles.debtInfo}>
                   <Text style={styles.debtName}>{debt.name}</Text>
-                  <Text style={styles.debtRemaining}>
-                    {formatCurrency(debt.remainingAmount)} restante
-                  </Text>
+                  {debt.isPaid ? (
+                    <Text style={[styles.debtRemaining, { color: '#43A047' }]}>
+                      Total: {formatCurrency(debt.totalAmount)} • Pagado ✓
+                    </Text>
+                  ) : (
+                    <Text style={styles.debtRemaining}>
+                      {formatCurrency(debt.remainingAmount)} restante de {formatCurrency(debt.totalAmount)}
+                    </Text>
+                  )}
                 </View>
                 <View style={[
                   styles.debtStatus,

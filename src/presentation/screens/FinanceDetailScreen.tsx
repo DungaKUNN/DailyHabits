@@ -27,7 +27,7 @@ export const FinanceDetailScreen: React.FC = () => {
   const [addType, setAddType] = useState<'income' | 'expense' | 'debt'>('income');
   const [newAmount, setNewAmount] = useState('');
   const [newDescription, setNewDescription] = useState('');
-  const [debtMonths, setDebtMonths] = useState('1');
+  const [debtMonths, setDebtMonths] = useState('');
   const [selectedSource, setSelectedSource] = useState<string>('');
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -47,7 +47,16 @@ export const FinanceDetailScreen: React.FC = () => {
     try {
       const repo = new SQLiteFinanceRepository(getDatabase());
       const p = await repo.getPeriodById(periodId);
-      if (p) setPeriod(p);
+      if (p) {
+        console.log('======= loadPeriod (FinanceDetailScreen) =======');
+        console.log('Period loaded:', p.month, p.year);
+        console.log('Income items:', JSON.stringify(p.income.map(i => ({ source: i.source, amount: i.amount }))));
+        console.log('Expense items:', JSON.stringify(p.expenses.map(e => ({ category: e.category, amount: e.amount }))));
+        console.log('Debt items:', JSON.stringify(p.debts.map(d => ({ name: d.name, totalAmount: d.totalAmount, remainingAmount: d.remainingAmount, isPaid: d.isPaid }))));
+        console.log('Savings:', p.savings);
+        console.log('======= FIN loadPeriod =======');
+        setPeriod(p);
+      }
     } catch (error) {
       console.error('Error loading period:', error);
     }
@@ -74,8 +83,14 @@ export const FinanceDetailScreen: React.FC = () => {
       const repo = new SQLiteFinanceRepository(getDatabase());
       if (addType === 'income') {
         await repo.updatePeriod(period.id, { income: [...period.income, { id: Date.now().toString(), source: selectedSource, amount }] });
+        console.log('======= AGREGAR INGRESO =======');
+        console.log('Added income - source:', selectedSource, 'amount:', amount);
+        console.log('======= FIN AGREGAR INGRESO =======');
       } else if (addType === 'expense') {
         await repo.updatePeriod(period.id, { expenses: [...period.expenses, { id: Date.now().toString(), category: selectedCategory, subcategory: selectedCategory, amount, isFixed: false }] });
+        console.log('======= AGREGAR GASTO =======');
+        console.log('Added expense - category:', selectedCategory, 'amount:', amount);
+        console.log('======= FIN AGREGAR GASTO =======');
       }
 
       setShowAddModal(false);
@@ -102,6 +117,10 @@ export const FinanceDetailScreen: React.FC = () => {
       const currentSavings = period.savings || 0;
       await repo.updatePeriod(period.id, { savings: currentSavings + amount });
       
+      console.log('======= GUARDAR AHORRO =======');
+      console.log('Added savings - previous:', currentSavings, 'added:', amount, 'new total:', currentSavings + amount);
+      console.log('======= FIN GUARDAR AHORRO =======');
+      
       setShowSavingsModal(false);
       setNewSavings('');
       await loadPeriod();
@@ -114,9 +133,13 @@ export const FinanceDetailScreen: React.FC = () => {
   const handleAddDebt = async () => {
     if (!newAmount || !period) return;
     const amount = parseFloat(newAmount);
-    const months = parseInt(debtMonths) || 1;
+    const monthsInput = parseInt(debtMonths);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Error', 'Monto inválido');
+      return;
+    }
+    if (!debtMonths || isNaN(monthsInput) || monthsInput <= 0) {
+      Alert.alert('Error', 'Ingresa los meses a pagar');
       return;
     }
     if (!selectedDebtType) {
@@ -126,7 +149,7 @@ export const FinanceDetailScreen: React.FC = () => {
 
     try {
       const repo = new SQLiteFinanceRepository(getDatabase());
-      const monthlyPayment = amount / months;
+      const monthlyPayment = amount / monthsInput;
       
       const newDebt: FinanceDebt = {
         id: Date.now().toString(),
@@ -140,6 +163,10 @@ export const FinanceDetailScreen: React.FC = () => {
 
       // Guardar la deuda en el período actual
       await repo.updatePeriod(period.id, { debts: [...period.debts, newDebt] });
+      
+      console.log('======= AGREGAR DEUDA =======');
+      console.log('Added debt - name:', newDebt.name, 'totalAmount:', newDebt.totalAmount, 'monthlyPayment:', newDebt.monthlyPayment, 'months:', monthsInput);
+      console.log('======= FIN AGREGAR DEUDA =======');
 
       // Obtener todos los períodos y ordenarlos por fecha
       const allPeriods = await repo.getAllPeriods();
@@ -154,7 +181,7 @@ export const FinanceDetailScreen: React.FC = () => {
       const currentIndex = sortedPeriods.findIndex(p => p.id === period.id);
       
       // Copiar a meses anteriores (si ya existen registros antes del actual)
-      for (let i = 1; i <= months; i++) {
+      for (let i = 1; i <= monthsInput; i++) {
         if (currentIndex - i < 0) break;
         
         const pastPeriod = sortedPeriods[currentIndex - i];
@@ -177,19 +204,19 @@ export const FinanceDetailScreen: React.FC = () => {
       }
       
       // Crear copias en los meses siguientes (hasta 'months' meses)
-      for (let i = 1; i <= months; i++) {
+      // Mantener el mismo remainingAmount hasta que el usuario pague en cada período
+      for (let i = 1; i <= monthsInput; i++) {
         if (currentIndex + i >= sortedPeriods.length) break;
         
         const futurePeriod = sortedPeriods[currentIndex + i];
         
-        const remainingAmount = Math.max(0, amount - (monthlyPayment * i));
-        
+        // Mantener el remainingAmount original (totalAmount) hasta que se pague
         const futureDebt: FinanceDebt = {
           ...newDebt,
           id: `${newDebt.id}_${futurePeriod.year}_${futurePeriod.month}`,
-          remainingAmount,
+          remainingAmount: amount, // Mantener el monto total
           paidThisMonth: false,
-          isPaid: remainingAmount <= 0,
+          isPaid: false,
         };
         
         const existingDebt = futurePeriod.debts.find(d => d.name === selectedDebtType && d.totalAmount === amount);
@@ -203,9 +230,9 @@ export const FinanceDetailScreen: React.FC = () => {
       setShowDebtModal(false);
       setNewAmount('');
       setSelectedDebtType('');
-      setDebtMonths('1');
+      setDebtMonths('');
       await loadPeriod();
-      Alert.alert('Éxito', `Deuda registrada por ${months} meses`);
+      Alert.alert('Éxito', `Deuda registrada por ${monthsInput} meses`);
     } catch (error) {
       Alert.alert('Error', 'No se pudo agregar');
     }
@@ -236,6 +263,47 @@ export const FinanceDetailScreen: React.FC = () => {
               };
               
               await repo.updatePeriod(period.id, { debts: updatedDebts });
+              console.log('======= PAGAR DEUDA =======');
+              console.log('Debt paid - name:', debt.name, 'paidAmount:', debt.monthlyPayment, 'remainingAmount:', Math.max(0, newRemaining), 'isPaid:', newRemaining <= 0);
+              
+              // Sincronizar el pago con otros períodos que tengan la misma deuda
+              const allPeriods = await repo.getAllPeriods();
+              const debtName = debt.name;
+              const debtTotalAmount = debt.totalAmount;
+              
+              // Solo actualizar períodos futuros (posteriores al actual)
+              const currentPeriodDate = new Date(period.year, parseInt(period.month.split('-')[1]) - 1);
+              
+              console.log('Sincronizando pago con otros períodos...');
+              for (const otherPeriod of allPeriods) {
+                if (otherPeriod.id === period.id) continue;
+                
+                const otherPeriodDate = new Date(otherPeriod.year, parseInt(otherPeriod.month.split('-')[1]) - 1);
+                if (otherPeriodDate <= currentPeriodDate) {
+                  console.log(`  Skipping ${otherPeriod.month} ${otherPeriod.year} (período anterior)`);
+                  continue;
+                }
+                
+                const otherDebtIndex = otherPeriod.debts.findIndex(d => 
+                  d.name === debtName && d.totalAmount === debtTotalAmount
+                );
+                
+                if (otherDebtIndex >= 0) {
+                  const otherDebt = otherPeriod.debts[otherDebtIndex];
+                  const otherNewRemaining = Math.max(0, otherDebt.remainingAmount - debt.monthlyPayment);
+                  
+                  const updatedOtherDebts = [...otherPeriod.debts];
+                  updatedOtherDebts[otherDebtIndex] = {
+                    ...otherDebt,
+                    remainingAmount: otherNewRemaining,
+                    isPaid: otherNewRemaining <= 0,
+                  };
+                  
+                  await repo.updatePeriod(otherPeriod.id, { debts: updatedOtherDebts });
+                  console.log(`  Updated ${otherPeriod.month} ${otherPeriod.year}: remainingAmount = ${otherNewRemaining}, paidThisMonth remains ${otherDebt.paidThisMonth}`);
+                }
+              }
+              console.log('======= FIN PAGAR DEUDA =======');
               await loadPeriod();
               
               if (newRemaining <= 0) {
@@ -349,7 +417,7 @@ export const FinanceDetailScreen: React.FC = () => {
   const totalSavings = period.savings || 0;
   const balance = totalIncome - totalExpenses - totalDebts;
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
+  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <View style={styles.container}>

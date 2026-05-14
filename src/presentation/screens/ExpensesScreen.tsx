@@ -270,7 +270,7 @@ const ExpensesScreen: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toFixed(2)}`;
+  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const getTotalElectricity = (period: ExpensePeriod) => {
     return period.floorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);

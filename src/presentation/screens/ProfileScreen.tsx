@@ -8,6 +8,9 @@ import {
   Switch,
   StatusBar,
   Alert,
+  Modal,
+  FlatList,
+  TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -30,6 +33,10 @@ import {
 import { MONETIZATION_CONFIG } from '../../services/MonetizationConfig';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
+import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
+import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
+import { getDatabase } from '../../data/Database';
+import { FinancePeriod } from '../../domain/entities/Finance';
 
 type ProfileNavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -40,17 +47,316 @@ const ProfileScreen: React.FC = () => {
   );
   const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [financeData, setFinanceData] = useState<{
+    averageIncome: number;
+    averageExpenses: number;
+    totalDebts: number;
+    totalDebtRemaining: number;
+    totalDebtOriginal: number;
+    monthlyPayment: number;
+    debts?: { totalAmount: number; remainingAmount: number; monthlyPayment: number; periodIndex: number }[];
+  } | null>(null);
+  const [selectedPercentage, setSelectedPercentage] = useState(20);
+  const [showSimulatorModal, setShowSimulatorModal] = useState(false);
+  const [detailedData, setDetailedData] = useState<any[]>([]);
+  const [manualIncome, setManualIncome] = useState('');
+  const [manualExpenses, setManualExpenses] = useState('');
+  const [additionalPayment, setAdditionalPayment] = useState('');
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (showSimulatorModal && financeData) {
+      setManualIncome('');
+      setManualExpenses('');
+      setAdditionalPayment('');
+    }
+  }, [showSimulatorModal, financeData]);
+
+  // Recargar datos del simulador cada vez que se abre el modal
+  useEffect(() => {
+    if (showSimulatorModal) {
+      console.log('======= SIMULADOR - Abriendo modal, recargando datos =======');
+      const reloadData = async () => {
+        try {
+          const financeRepo = new SQLiteFinanceRepository(getDatabase());
+          const expenseRepo = new SQLiteExpenseRepository(getDatabase());
+          const financePeriods = await financeRepo.getAllPeriods();
+          const expensePeriods = await expenseRepo.getAllPeriods();
+          
+          console.log('SIMULADOR - Períodos obtenidos:', financePeriods.length);
+          if (financePeriods.length > 0) {
+            const lastPeriod = financePeriods[financePeriods.length - 1];
+            console.log('SIMULADOR - Período más reciente:', lastPeriod.monthName, lastPeriod.year);
+            console.log('SIMULADOR - Deudas en último período:', JSON.stringify(lastPeriod.debts));
+          }
+          
+          // Reconstruir financeData
+          let totalIncome = 0;
+          let totalFinanceExpenses = 0;
+          let totalDebtRemaining = 0;
+          let totalMonthlyPayment = 0;
+
+          const uniqueDebts = new Map<string, { totalAmount: number; remainingAmount: number; monthlyPayment: number; periodIndex: number }>();
+          let totalDebtOriginal = 0;
+
+          financePeriods.forEach((p, periodIndex) => {
+            totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
+            totalFinanceExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            p.debts.forEach(d => {
+              const key = `${d.name}_${d.totalAmount}`;
+              const existing = uniqueDebts.get(key);
+              if (!existing || periodIndex > existing.periodIndex) {
+                uniqueDebts.set(key, {
+                  totalAmount: d.totalAmount,
+                  remainingAmount: d.remainingAmount,
+                  monthlyPayment: d.monthlyPayment,
+                  periodIndex: periodIndex
+                });
+              }
+            });
+          });
+
+          uniqueDebts.forEach((d) => {
+            totalDebtOriginal += d.totalAmount;
+            if (d.remainingAmount > 0) {
+              totalDebtRemaining += d.remainingAmount;
+              totalMonthlyPayment += d.monthlyPayment;
+            }
+          });
+
+          console.log('SIMULADOR - totalDebtOriginal:', totalDebtOriginal);
+
+          let totalLuz = 0;
+          let totalAgua = 0;
+          expensePeriods.forEach(p => {
+            totalLuz += p.electricity?.totalReceipt || 0;
+            totalAgua += p.water?.totalReceipt || 0;
+          });
+
+          const totalExpenses = totalFinanceExpenses + totalLuz + totalAgua;
+          const averageIncome = financePeriods.length > 0 ? totalIncome / financePeriods.length : 0;
+          const averageExpenses = financePeriods.length > 0 ? totalExpenses / financePeriods.length : 0;
+
+          console.log('SIMULADOR - totalDebtRemaining:', totalDebtRemaining);
+          console.log('SIMULADOR - uniqueDebts:', Array.from(uniqueDebts.entries()).map(([k, v]) => `${k}: ${v.remainingAmount}`));
+
+          setFinanceData({
+            averageIncome,
+            averageExpenses,
+            totalDebts: totalDebtRemaining,
+            totalDebtRemaining,
+            totalDebtOriginal,
+            monthlyPayment: totalMonthlyPayment,
+            debts: Array.from(uniqueDebts.values())
+          });
+
+          // Generar detailedData
+          const detailed: any[] = [];
+          const maxMonths = Math.max(financePeriods.length, expensePeriods.length);
+          for (let i = 0; i < maxMonths; i++) {
+            const financeP = financePeriods[i];
+            const expenseP = expensePeriods[i];
+            const income = financeP ? financeP.income.reduce((sum, inc) => sum + inc.amount, 0) : 0;
+            const financeExpenses = financeP ? financeP.expenses.reduce((sum, exp) => sum + exp.amount, 0) : 0;
+            const luz = expenseP ? (expenseP.floorsElectricity?.reduce((sum, f) => sum + (f.consumptionPrice || 0) + (f.igv || 0), 0) || 0) : 0;
+            const agua = expenseP ? (expenseP.water?.totalReceipt || 0) : 0;
+            const totalGastos = financeExpenses + luz + agua;
+            const disponible = income - totalGastos;
+            let debts = 0;
+            let debtDetails: any[] = [];
+            if (financeP) {
+              financeP.debts.forEach((d: any) => {
+                if (!d.isPaid && d.remainingAmount > 0) {
+                  debts += d.remainingAmount;
+                  debtDetails.push({ name: d.name, remaining: d.remainingAmount, paidThisMonth: d.paidThisMonth || false });
+                }
+              });
+            }
+            detailed.push({
+              month: financeP?.monthName || expenseP?.monthName || `Mes ${i+1}`,
+              year: financeP?.year || expenseP?.year || 2026,
+              income,
+              financeExpenses,
+              luz,
+              agua,
+              totalGastos,
+              disponible,
+              debts,
+              debtDetails
+            });
+          }
+          console.log('SIMULADOR - detailedData:', detailed);
+          setDetailedData(detailed);
+        } catch (error) {
+          console.error('Error reloadData:', error);
+        }
+      };
+      reloadData();
+    }
+  }, [showSimulatorModal]);
 
   const loadSettings = async () => {
     const payment = await getPaymentReminderSettings();
     const premium = await getPremiumStatus();
     setPaymentSettings(payment);
     setIsPremium(premium);
+    await loadFinanceData();
     setLoading(false);
+  };
+
+  const loadFinanceData = async () => {
+    try {
+      const financeRepo = new SQLiteFinanceRepository(getDatabase());
+      const expenseRepo = new SQLiteExpenseRepository(getDatabase());
+      
+      const financePeriods = await financeRepo.getAllPeriods();
+      const expensePeriods = await expenseRepo.getAllPeriods();
+      
+      console.log('======= SIMULADOR DE DEUDAS - loadFinanceData =======');
+      console.log('Períodos de Finanzas:', financePeriods.length);
+      console.log('Períodos de Gastos (Luz/Agua):', expensePeriods.length);
+      
+      if (financePeriods.length === 0 && expensePeriods.length === 0) {
+        console.log('No hay períodos registrados');
+        setFinanceData(null);
+        return;
+      }
+
+      // Calcular TOTAL de ingresos de Finanzas
+      let totalIncome = 0;
+      let totalFinanceExpenses = 0;
+      let totalDebtRemaining = 0;
+      let totalDebtOriginal = 0;
+      let totalMonthlyPayment = 0;
+
+      // Deudas únicas del período más reciente
+      const uniqueDebts = new Map<string, { totalAmount: number; remainingAmount: number; monthlyPayment: number; periodIndex: number }>();
+
+      financePeriods.forEach((p, periodIndex) => {
+        totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
+        totalFinanceExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
+        
+        p.debts.forEach(d => {
+          const key = `${d.name}_${d.totalAmount}`;
+          const existing = uniqueDebts.get(key);
+          if (!existing || periodIndex > existing.periodIndex) {
+            uniqueDebts.set(key, {
+              totalAmount: d.totalAmount,
+              remainingAmount: d.remainingAmount,
+              monthlyPayment: d.monthlyPayment,
+              periodIndex: periodIndex
+            });
+          }
+        });
+      });
+
+      console.log('Deudas únicas (período más reciente):');
+      uniqueDebts.forEach((d, key) => {
+        console.log(`  ${key}: remainingAmount=${d.remainingAmount}, isPaid=${d.remainingAmount <= 0}`);
+        totalDebtOriginal += d.totalAmount;
+        if (d.remainingAmount > 0) {
+          totalDebtRemaining += d.remainingAmount;
+          totalMonthlyPayment += d.monthlyPayment;
+        }
+      });
+
+      // Calcular TOTAL de gastos de Luz y Agua
+      let totalLuz = 0;
+      let totalAgua = 0;
+      
+      expensePeriods.forEach(p => {
+        // Gastos de luz por piso
+        p.floorsElectricity.forEach(floor => {
+          totalLuz += floor.consumptionPrice + floor.igv;
+        });
+        // Gastos de agua
+        totalAgua += p.water.totalReceipt || 0;
+      });
+
+      console.log('Gastos de Luz y Agua:');
+      console.log('  Total Luz:', totalLuz);
+      console.log('  Total Agua:', totalAgua);
+
+      // Calcular PROMEDIOS
+      const totalMonths = Math.max(financePeriods.length, expensePeriods.length, 1);
+      const averageIncome = totalIncome / totalMonths;
+      const averageFinanceExpenses = totalFinanceExpenses / totalMonths;
+      const averageLuz = totalLuz / totalMonths;
+      const averageAgua = totalAgua / totalMonths;
+      
+      // Total de todos los gastos
+      const totalExpenses = totalFinanceExpenses + totalLuz + totalAgua;
+      const averageTotalExpenses = averageFinanceExpenses + averageLuz + averageAgua;
+
+      console.log('RESULTADOS PROMEDIO MENSUAL:');
+      console.log('  Ingresos promedio:', averageIncome);
+      console.log('  Gastos Finanzas promedio:', averageFinanceExpenses);
+      console.log('  Luz promedio:', averageLuz);
+      console.log('  Agua promedio:', averageAgua);
+      console.log('  Total gastos promedio:', averageTotalExpenses);
+      console.log('  Disponible (para pagar deudas):', averageIncome - averageTotalExpenses);
+      console.log('  Total deuda pendiente:', totalDebtRemaining);
+      console.log('======= FIN SIMULADOR =======');
+
+      setFinanceData({
+        averageIncome,
+        averageExpenses: averageTotalExpenses,
+        totalDebts: totalDebtRemaining,
+        totalDebtRemaining,
+        totalDebtOriginal,
+        monthlyPayment: totalMonthlyPayment
+      });
+      
+      // Generar datos detallados por mes
+      const detailedData: any[] = [];
+      const maxMonths = Math.max(financePeriods.length, expensePeriods.length);
+      
+      for (let i = 0; i < maxMonths; i++) {
+        const financeP = financePeriods[i];
+        const expenseP = expensePeriods[i];
+        
+        const income = financeP ? financeP.income.reduce((sum, inc) => sum + inc.amount, 0) : 0;
+        const financeExpenses = financeP ? financeP.expenses.reduce((sum, exp) => sum + exp.amount, 0) : 0;
+        const luz = expenseP ? expenseP.floorsElectricity.reduce((sum, f) => sum + f.consumptionPrice + f.igv, 0) : 0;
+        const agua = expenseP ? expenseP.water.totalReceipt : 0;
+        const totalGastos = financeExpenses + luz + agua;
+        const disponible = income - totalGastos;
+        
+        let debts = 0;
+        let debtDetails: any[] = [];
+        if (financeP) {
+          financeP.debts.forEach(d => {
+            if (!d.isPaid && d.remainingAmount > 0) {
+              debts += d.remainingAmount;
+              debtDetails.push({ name: d.name, remaining: d.remainingAmount, paidThisMonth: d.paidThisMonth || false });
+            }
+          });
+        }
+        
+        detailedData.push({
+          month: financeP?.monthName || expenseP?.monthName || `Mes ${i+1}`,
+          year: financeP?.year || expenseP?.year || 2026,
+          income,
+          financeExpenses,
+          luz,
+          agua,
+          totalGastos,
+          disponible,
+          debts,
+          debtDetails
+        });
+      }
+      
+      console.log('Datos detallados por mes:', detailedData);
+      setDetailedData(detailedData);
+    } catch (error) {
+      console.error('Error loading finance data:', error);
+      setFinanceData(null);
+    }
   };
 
   const handleBuyPremium = () => {
@@ -243,6 +549,44 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.divider} />
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📊 Simulador de Deudas</Text>
+          <Text style={styles.sectionDescription}>
+            Calcula cuánto tiempo teará pagar tus deudas
+          </Text>
+          
+          {!financeData ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>📈</Text>
+              <Text style={styles.emptyText}>
+                No hay datos de finanzas registrados.{'\n'}
+                Agrega ingresos y gastos en la sección Finanzas.
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.utilityButton}
+              onPress={() => setShowSimulatorModal(true)}
+            >
+              <LinearGradient
+                colors={['#4CAF50', '#388E3C']}
+                style={styles.utilityButtonGradient}
+              >
+                <Text style={styles.utilityButtonIcon}>📊</Text>
+                <View style={styles.utilityButtonContent}>
+                  <Text style={styles.utilityButtonTitle}>Abrir Simulador</Text>
+                  <Text style={styles.utilityButtonSubtitle}>
+                    Ver análisis detallado por mes
+                  </Text>
+                </View>
+                <Text style={styles.utilityButtonArrow}>›</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>👑 Premium</Text>
           
           {isPremium ? (
@@ -420,6 +764,226 @@ const ProfileScreen: React.FC = () => {
         )}
 
         <View style={styles.bottomSpacer} />
+
+      <Modal
+        visible={showSimulatorModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowSimulatorModal(false)}
+      >
+        <StatusBar backgroundColor="#1565C0" barStyle="light-content" />
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>📊 Simulador de Deudas</Text>
+            <TouchableOpacity onPress={() => setShowSimulatorModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
+            {/* Deudas Pendientes - Todos los períodos no pagados */}
+            {financeData && financeData.totalDebtRemaining > 0 && (
+              <View style={styles.modalSummaryCard}>
+                <Text style={styles.modalSummaryTitle}>🏦 Deudas Pendientes</Text>
+                
+                {detailedData.length > 0 && (
+                  <>
+                    {(() => {
+                      console.log('=== RENDER Deudas Pendientes ===');
+                      console.log('detailedData length:', detailedData.length);
+                      detailedData.forEach((item, index) => {
+                        console.log(`Periodo ${index}: ${item.month} ${item.year}`);
+                        console.log('  debtDetails:', JSON.stringify(item.debtDetails));
+                      });
+                      return null;
+                    })()}
+                    {detailedData.map((item, index) => {
+                      const debts = item?.debtDetails?.filter((d: any) => d.remaining > 0 && !d.paidThisMonth) || [];
+                      console.log(`Render ${item.month}: ${debts.length} debts pendientes (no pagadas)`);
+                      if (debts.length === 0) return null;
+                      const isCurrent = index === detailedData.length - 1;
+                      return (
+                        <View key={index} style={styles.debtItemCard}>
+                          <Text style={styles.debtItemTitle}>
+                            {item.month} {item.year} {isCurrent ? '(Actual)' : ''}
+                          </Text>
+                          {debts.map((d: any, i: number) => (
+                            <View key={i} style={styles.debtItemRow}>
+                              <Text style={styles.debtItemName}>• {d.name}</Text>
+                              <Text style={styles.debtItemAmount}>S/ {d.remaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
+
+                <View style={styles.modalSummaryRow}>
+                  <Text style={styles.modalSummaryLabel}>Deuda total (original):</Text>
+                  <Text style={[styles.modalSummaryValue, { color: '#1565C0' }]}>S/ {(financeData.totalDebtOriginal || 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                </View>
+                <View style={[styles.modalSummaryRow, { borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: 10, marginTop: 5 }]}>
+                  <Text style={styles.modalSummaryLabel}>Total pendiente:</Text>
+                  <Text style={[styles.modalSummaryValue, { color: '#FF9800', fontSize: 18 }]}>S/ {financeData.totalDebtRemaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                </View>
+                <View style={styles.modalSummaryRow}>
+                  <Text style={styles.modalSummaryLabel}>Pago mensual:</Text>
+                  <Text style={styles.modalSummaryValue}>S/ {financeData.monthlyPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                </View>
+              </View>
+            )}
+
+            {financeData && financeData.totalDebtRemaining === 0 && (
+              <View style={styles.modalSummaryCard}>
+                <Text style={styles.modalSuccessTitle}>✅ Sin Deudas</Text>
+                <Text style={styles.modalSuccessText}>¡Felicitaciones! No tienes deudas pendientes en este momento.</Text>
+              </View>
+            )}
+
+            {/* Simulador */}
+            {financeData && financeData.totalDebtRemaining > 0 && (
+              <View style={styles.modalSimulatorSection}>
+                <Text style={styles.modalSectionTitle}>🎯 Simular Tiempo de Pago</Text>
+                
+                {/* Editor de Ingresos y Gastos */}
+                <View style={styles.modalInputSection}>
+                  <Text style={styles.modalInputLabel}>📝 Ingresa tus propios valores (opcional):</Text>
+                  
+                  <View style={styles.modalInputRow}>
+                    <Text style={styles.modalInputLabelSmall}>Ingreso mensual (S/):</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={manualIncome}
+                      onChangeText={text => setManualIncome(text.replace(/[^0-9.]/g, ''))}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#999"
+                      returnKeyType="done"
+                      blurOnSubmit={false}
+                    />
+                  </View>
+                  
+                  <View style={styles.modalInputRow}>
+                    <Text style={styles.modalInputLabelSmall}>Total Gastos + Servicios (S/):</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={manualExpenses}
+                      onChangeText={text => setManualExpenses(text.replace(/[^0-9.]/g, ''))}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#999"
+                      returnKeyType="done"
+                      blurOnSubmit={false}
+                    />
+                  </View>
+                </View>
+
+                {/* Cálculo del Disponible - solo mostrar cuando usuario ingrese valores */}
+                {(() => {
+                  const hasIncome = manualIncome.trim() !== '';
+                  const hasExpenses = manualExpenses.trim() !== '';
+                  const hasValues = hasIncome || hasExpenses;
+                  
+                  if (!hasValues) {
+                    return (
+                      <View style={styles.modalAvailableCard}>
+                        <Text style={styles.modalAvailableLabel}>💰 Disponible (Ingresos - Gastos):</Text>
+                        <Text style={[styles.modalAvailableValue, { color: '#666' }]}>
+                          S/ 0.00
+                        </Text>
+                        <Text style={styles.modalHintText}>Ingresa valores arriba para calcular</Text>
+                      </View>
+                    );
+                  }
+                  
+                  const income = parseFloat(manualIncome) || 0;
+                  const expenses = parseFloat(manualExpenses) || 0;
+                  const available = income - expenses;
+                  
+                  return (
+                    <View style={styles.modalAvailableCard}>
+                      <Text style={styles.modalAvailableLabel}>💰 Disponible (Ingresos - Gastos):</Text>
+                      <Text style={[styles.modalAvailableValue, { color: available >= 0 ? '#43A047' : '#E53935' }]}>
+                        S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
+                      </Text>
+                      {available < 0 && (
+                        <Text style={styles.modalWarningText}>⚠️ Tus gastos superan tus ingresos</Text>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* Pago adicional para deudas */}
+                <View style={styles.modalInputSection}>
+                  <Text style={styles.modalInputLabel}>💳 ¿Cuánto adicional quieres usar para pagar deudas?</Text>
+                  
+                  <View style={styles.modalInputRow}>
+                    <Text style={styles.modalInputLabelSmall}>Monto adicional mensual (S/):</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={additionalPayment}
+                      onChangeText={text => setAdditionalPayment(text.replace(/[^0-9.]/g, ''))}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#999"
+                      returnKeyType="done"
+                      blurOnSubmit={false}
+                    />
+                  </View>
+                </View>
+
+                {/* Resultado del cálculo */}
+                {(() => {
+                  const income = parseFloat(manualIncome) || financeData.averageIncome;
+                  const expenses = parseFloat(manualExpenses) || financeData.averageExpenses;
+                  const additional = parseFloat(additionalPayment) || 0;
+                  const available = income - expenses;
+                  const totalPayment = available + additional;
+                  
+                  const monthsRemaining = totalPayment > 0 ? Math.ceil(financeData.totalDebtRemaining / totalPayment) : 0;
+                  const today = new Date();
+                  const futureDate = new Date(today.getFullYear(), today.getMonth() + monthsRemaining, today.getDate());
+                  const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                  
+                  return (
+                    <View style={styles.modalResultCard}>
+                      {monthsRemaining > 0 && monthsRemaining <= 600 ? (
+                        <>
+                          <Text style={styles.modalResultValue}>✓ Libre de deudas en {monthsRemaining} meses</Text>
+                          <Text style={styles.modalResultDate}>Fecha estimada: {monthNames[futureDate.getMonth()]} {futureDate.getFullYear()}</Text>
+                          <Text style={styles.modalResultSubtext}>
+                            Pagando S/ {totalPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}/mes{'\n'}
+                            (S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })} disponible + S/ {additional.toLocaleString('es-PE', { minimumFractionDigits: 2 })} adicional)
+                          </Text>
+                        </>
+                      ) : totalPayment <= 0 ? (
+                        <Text style={styles.modalResultWarning}>
+                          ⚠️ Ingresa un monto adicional para pagar tus deudas{'\n'}
+                          o increase tus ingresos
+                        </Text>
+                      ) : (
+                        <Text style={styles.modalResultWarning}>
+                          ⚠️ El tiempo de pago es muy extenso.{'\n'}
+                          Considera aumentar el monto adicional.
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })()}
+              </View>
+            )}
+
+            {financeData && financeData.totalDebtRemaining === 0 && (
+              <View style={styles.modalResultCard}>
+                <Text style={styles.modalResultSuccess}>🎉 ¡Felicitaciones! No tienes deudas pendientes</Text>
+              </View>
+            )}
+
+            <View style={styles.modalSpacer} />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
       </ScrollView>
       </SafeAreaView>
     </View>
@@ -992,6 +1556,391 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 13,
     textDecorationLine: 'underline',
+  },
+  emptyState: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  emptyIcon: {
+    fontSize: 40,
+    marginBottom: 10,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  simulatorCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 15,
+    marginTop: 10,
+  },
+  simulatorRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  simulatorLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  simulatorValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  percentageLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  percentageOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  percentageButton: {
+    flex: 1,
+    marginHorizontal: 4,
+    paddingVertical: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  percentageButtonActive: {
+    backgroundColor: '#1565C0',
+    borderColor: '#1565C0',
+  },
+  percentageButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  percentageButtonTextActive: {
+    color: '#fff',
+  },
+  resultCard: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    padding: 20,
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  resultTitle: {
+    fontSize: 14,
+    color: '#1565C0',
+    marginBottom: 8,
+  },
+  resultValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#1565C0',
+    marginBottom: 5,
+  },
+  resultDate: {
+    fontSize: 16,
+    color: '#1565C0',
+    fontWeight: '600',
+  },
+  resultSubtext: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  resultWarning: {
+    fontSize: 13,
+    color: '#E53935',
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: '#1565C0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  modalClose: {
+    fontSize: 24,
+    color: '#fff',
+    padding: 5,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 15,
+  },
+  modalSummaryCard: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+  },
+  modalSummaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1565C0',
+    marginBottom: 10,
+  },
+  modalSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  modalSummaryLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  modalSummaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  modalEmpty: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    padding: 20,
+  },
+  modalMonthCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  modalMonthHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+  },
+  modalMonthName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  modalMonthDebt: {
+    fontSize: 13,
+    color: '#FF9800',
+    fontWeight: '600',
+  },
+  modalDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  modalDetailLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  modalDetailValue: {
+    fontSize: 13,
+    color: '#333',
+  },
+  modalDetailLabelBold: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalDetailValueBold: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalDebtInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  modalDebtTitle: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  modalDebtItem: {
+    fontSize: 12,
+    color: '#FF9800',
+  },
+  modalSimulatorSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 2,
+    borderTopColor: '#1565C0',
+  },
+  modalPercentageLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 10,
+  },
+  modalResultCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 20,
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  modalResultValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#43A047',
+    marginBottom: 5,
+  },
+  modalResultDate: {
+    fontSize: 16,
+    color: '#43A047',
+    marginBottom: 5,
+  },
+  modalResultSubtext: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+  },
+  modalResultSuccess: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#43A047',
+    textAlign: 'center',
+  },
+  modalResultWarning: {
+    fontSize: 14,
+    color: '#E53935',
+    textAlign: 'center',
+  },
+  modalInputSection: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 15,
+  },
+  modalInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+  },
+  modalInputLabelSmall: {
+    fontSize: 13,
+    color: '#666',
+    flex: 1,
+  },
+  modalInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    textAlign: 'right',
+    minHeight: 44,
+    color: '#000',
+  },
+  modalAvailableCard: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 10,
+    padding: 15,
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  modalAvailableLabel: {
+    fontSize: 14,
+    color: '#1565C0',
+    marginBottom: 5,
+  },
+  modalAvailableValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  modalWarningText: {
+    fontSize: 12,
+    color: '#E53935',
+    marginTop: 5,
+  },
+  modalHintText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  debtItemCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FF9800',
+  },
+  debtItemTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF9800',
+    marginBottom: 5,
+  },
+  debtItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  debtItemName: {
+    fontSize: 13,
+    color: '#666',
+  },
+  debtItemAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalSuccessTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#43A047',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  modalSuccessText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalSpacer: {
+    height: 30,
   },
   bottomSpacer: {
     height: 20,
