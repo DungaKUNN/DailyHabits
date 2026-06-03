@@ -95,12 +95,13 @@ const FinancesTabScreen: React.FC = () => {
       });
       
       console.log('======= createPeriod =======');
-      console.log('Created new period:', newPeriod.month, newPeriod.year);
-      console.log('======= FIN createPeriod =======');
+      console.log(`${LOG_PREFIX} Created new period: ${newPeriod.monthName} ${newPeriod.year}`);
       
       const allPeriods = await repo.getAllPeriods();
+      console.log(`${LOG_PREFIX} Total periods now: ${allPeriods.length}`);
       
       const debtsToCopy: typeof newPeriod.debts = [];
+      let debtsFromCount = 0;
       
       for (const period of allPeriods) {
         if (period.year > year || (period.year === year && parseInt(period.month.split('-')[1]) > month + 1)) {
@@ -109,6 +110,7 @@ const FinancesTabScreen: React.FC = () => {
         
         for (const debt of period.debts) {
           if (!debt.isPaid && debt.remainingAmount > 0) {
+            debtsFromCount++;
             const prevMonth = parseInt(period.month.split('-')[1]) - 1;
             const monthDiff = (year - period.year) * 12 + (month - prevMonth);
             
@@ -131,9 +133,12 @@ const FinancesTabScreen: React.FC = () => {
         }
       }
       
+      console.log(`${LOG_PREFIX} Found ${debtsFromCount} unpaid debts in previous periods, copying ${debtsToCopy.length} to new month`);
       if (debtsToCopy.length > 0) {
         await repo.updatePeriod(newPeriod.id, { debts: debtsToCopy });
+        debtsToCopy.forEach(d => console.log(`${LOG_PREFIX}   Copied debt: "${d.name}" - ${d.remainingAmount}`));
       }
+      console.log(`======= FIN createPeriod =======`);
       
       await loadFinanceData();
       setShowMonthModal(false);

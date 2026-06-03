@@ -277,10 +277,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
       >
         <Text style={styles.logo}>🏠</Text>
         <Text style={styles.appName}>CasaBalance</Text>
-        <Text style={styles.tagline}>Comidas y Gastos del Hogar</Text>
+        <Text style={styles.tagline}>Gastos del Hogar</Text>
 
         <View style={styles.featuresContainer}>
-          <Text style={styles.featureItem}>🍽️ Habitos de comidas</Text>
           <Text style={styles.featureItem}>💡 Pago de recibos</Text>
           <Text style={styles.featureItem}>📊 Estadísticas</Text>
           <Text style={styles.featureItem}>👨‍👩‍👧‍👦 Comparte con tu familia</Text>

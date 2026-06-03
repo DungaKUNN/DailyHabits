@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LOG_PREFIX = '[SettingsService]';
 const SETTINGS_KEY = '@notification_settings';
-const PREMIUM_KEY = '@premium_status';
 
 export interface NotificationSettings {
   enabled: boolean;
@@ -61,21 +60,3 @@ export const setReminderMinutes = async (minutes: number): Promise<void> => {
   console.log(`${LOG_PREFIX} setReminderMinutes - fin`);
 };
 
-// Premium functions
-export const getPremiumStatus = async (): Promise<boolean> => {
-  try {
-    const premium = await AsyncStorage.getItem(PREMIUM_KEY);
-    return premium === 'true';
-  } catch (error) {
-    console.error('Error getting premium status:', error);
-    return false;
-  }
-};
-
-export const setPremiumStatus = async (isPremium: boolean): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(PREMIUM_KEY, isPremium ? 'true' : 'false');
-  } catch (error) {
-    console.error('Error setting premium status:', error);
-  }
-};

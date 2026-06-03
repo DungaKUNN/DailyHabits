@@ -12,35 +12,6 @@ const PAYMENT_REMINDER_HOUR = '@payment_reminder_hour';
 const PAYMENT_REMINDER_MINUTE = '@payment_reminder_minute';
 const PAYMENT_REMINDER_DAYS = '@payment_reminder_days';
 
-const MOTIVATIONAL_MESSAGES = {
-  breakfast: [
-    '¡Un buen desayuno es el mejor comienzo!',
-    '¡Energía para empezar el día!',
-    '¡El desayuno es la comida más importante!',
-    '¡Dale a tu cuerpo el combustible que necesita!',
-    '¡Día nuevo, desayuno nuevo!',
-  ],
-  lunch: [
-    '¡Recarga energías para la tarde!',
-    '¡Un buen almuerzo te mantiene productivo!',
-    '¡Tu cuerpo te lo agradecerá!',
-    '¡Momento de nutrirse bien!',
-    '¡No saltes el almuerzo, te mereces comer bien!',
-  ],
-  dinner: [
-    '¡Termina el día comiendo rico!',
-    '¡Una cena ligera para descansar mejor!',
-    '¡Disfruta tu última comida del día!',
-    '¡Buen provecho para cerrar el día!',
-    '¡Cena tranquilo, mañana será otro gran día!',
-  ],
-};
-
-const getRandomMessage = (type: string): string => {
-  const messages = MOTIVATIONAL_MESSAGES[type as keyof typeof MOTIVATIONAL_MESSAGES] || MOTIVATIONAL_MESSAGES.breakfast;
-  return messages[Math.floor(Math.random() * messages.length)];
-};
-
 const initNotifications = async () => {
   console.log(`${LOG_PREFIX} initNotifications - ini - isInitialized: ${isInitialized}`);
   if (isInitialized) {
@@ -58,16 +29,6 @@ const initNotifications = async () => {
         shouldShowList: true,
       }),
     });
-    
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('meal-reminders', {
-        name: 'Recordatorios de Comidas',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#4CAF50',
-        sound: 'default',
-      });
-    }
     
     isInitialized = true;
   } catch (error) {
@@ -95,10 +56,6 @@ export const requestNotificationPermissions = async (): Promise<boolean> => {
   }
 };
 
-// Meal reminder functions removed - meals feature was disabled
-// export const scheduleMealReminder = async (meal: Meal, customMinutes?: number): Promise<string | null> => { ... }
-// export const cancelMealReminder = async (mealId: string): Promise<void> => { ... }
-
 export const cancelAllReminders = async (): Promise<void> => {
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
@@ -115,16 +72,6 @@ export const getScheduledReminders = async () => {
     return [];
   }
 };
-
-export const QUICK_REMINDER_OPTIONS = [
-  { label: 'Ahora', value: 0, icon: '⏰' },
-  { label: '5 min', value: 5, icon: '⚡' },
-  { label: '10 min', value: 10, icon: '⏱️' },
-  { label: '15 min', value: 15, icon: '🕐' },
-  { label: '30 min', value: 30, icon: '🕕' },
-  { label: '1 hr', value: 60, icon: '🕐' },
-  { label: '2 hrs', value: 120, icon: '🕑' },
-];
 
 export interface PaymentReminderSettings {
   enabled: boolean;

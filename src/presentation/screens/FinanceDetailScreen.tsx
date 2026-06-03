@@ -169,8 +169,8 @@ export const FinanceDetailScreen: React.FC = () => {
       await repo.updatePeriod(period.id, { debts: [...period.debts, newDebt] });
       
       console.log('======= AGREGAR DEUDA =======');
-      console.log('Added debt - name:', newDebt.name, 'totalAmount:', newDebt.totalAmount, 'monthlyPayment:', newDebt.monthlyPayment, 'months:', monthsInput);
-      console.log('======= FIN AGREGAR DEUDA =======');
+      console.log(`${LOG_PREFIX} Debt created - name: "${newDebt.name}", amount: ${newDebt.totalAmount}, monthly: ${newDebt.monthlyPayment}, months: ${monthsInput}`);
+      console.log(`${LOG_PREFIX} Current period: ${period.monthName} ${period.year}`);
 
       // Obtener todos los períodos y ordenarlos por fecha
       const allPeriods = await repo.getAllPeriods();
@@ -184,41 +184,26 @@ export const FinanceDetailScreen: React.FC = () => {
       
       const currentIndex = sortedPeriods.findIndex(p => p.id === period.id);
       
-      // Copiar a meses anteriores (si ya existen registros antes del actual)
-      for (let i = 1; i <= monthsInput; i++) {
-        if (currentIndex - i < 0) break;
-        
-        const pastPeriod = sortedPeriods[currentIndex - i];
-        const remainingAmount = Math.max(0, amount - (monthlyPayment * i));
-        
-        const pastDebt: FinanceDebt = {
-          ...newDebt,
-          id: `${newDebt.id}_past_${pastPeriod.year}_${pastPeriod.month}`,
-          remainingAmount,
-          paidThisMonth: false,
-          isPaid: remainingAmount <= 0,
-        };
-        
-        const existingDebt = pastPeriod.debts.find(d => d.name === selectedDebtType && d.totalAmount === amount);
-        if (!existingDebt) {
-          await repo.updatePeriod(pastPeriod.id, {
-            debts: [...pastPeriod.debts, pastDebt]
-          });
-        }
-      }
+      console.log(`${LOG_PREFIX} Total periods: ${sortedPeriods.length}, currentIndex: ${currentIndex}`);
       
-      // Crear copias en los meses siguientes (hasta 'months' meses)
-      // Mantener el mismo remainingAmount hasta que el usuario pague en cada período
+      // NO copiar a meses anteriores - la deuda solo existe desde el mes actual hacia adelante
+      console.log(`${LOG_PREFIX} Skipping past months (debt starts from current month only)`);
+      
+      // Copiar a meses futuros que ya existen
+      let futureCopies = 0;
       for (let i = 1; i <= monthsInput; i++) {
-        if (currentIndex + i >= sortedPeriods.length) break;
+        if (currentIndex + i >= sortedPeriods.length) {
+          console.log(`${LOG_PREFIX} Future period index ${currentIndex + i} doesn't exist yet - will propagate when created via createPeriod`);
+          break;
+        }
         
         const futurePeriod = sortedPeriods[currentIndex + i];
+        console.log(`${LOG_PREFIX} Copying debt to future period: ${futurePeriod.monthName} ${futurePeriod.year}`);
         
-        // Mantener el remainingAmount original (totalAmount) hasta que se pague
         const futureDebt: FinanceDebt = {
           ...newDebt,
           id: `${newDebt.id}_${futurePeriod.year}_${futurePeriod.month}`,
-          remainingAmount: amount, // Mantener el monto total
+          remainingAmount: amount,
           paidThisMonth: false,
           isPaid: false,
         };
@@ -228,8 +213,12 @@ export const FinanceDetailScreen: React.FC = () => {
           await repo.updatePeriod(futurePeriod.id, {
             debts: [...futurePeriod.debts, futureDebt]
           });
+          futureCopies++;
         }
       }
+      
+      console.log(`${LOG_PREFIX} Debt copied to ${futureCopies} existing future periods`);
+      console.log(`======= FIN AGREGAR DEUDA =======`);
 
       setShowDebtModal(false);
       setNewAmount('');
@@ -268,7 +257,7 @@ export const FinanceDetailScreen: React.FC = () => {
               
               await repo.updatePeriod(period.id, { debts: updatedDebts });
               console.log('======= PAGAR DEUDA =======');
-              console.log('Debt paid - name:', debt.name, 'paidAmount:', debt.monthlyPayment, 'remainingAmount:', Math.max(0, newRemaining), 'isPaid:', newRemaining <= 0);
+              console.log(`${LOG_PREFIX} Debt paid in ${period.monthName} ${period.year}: name="${debt.name}", paidAmount=${debt.monthlyPayment}, remaining=${Math.max(0, newRemaining)}, isFullyPaid=${newRemaining <= 0}`);
               
               // Sincronizar el pago con otros períodos que tengan la misma deuda
               const allPeriods = await repo.getAllPeriods();
@@ -278,13 +267,14 @@ export const FinanceDetailScreen: React.FC = () => {
               // Solo actualizar períodos futuros (posteriores al actual)
               const currentPeriodDate = new Date(period.year, parseInt(period.month.split('-')[1]) - 1);
               
-              console.log('Sincronizando pago con otros períodos...');
+              console.log(`${LOG_PREFIX} Syncing payment to future periods...`);
+              let syncCount = 0;
               for (const otherPeriod of allPeriods) {
                 if (otherPeriod.id === period.id) continue;
                 
                 const otherPeriodDate = new Date(otherPeriod.year, parseInt(otherPeriod.month.split('-')[1]) - 1);
                 if (otherPeriodDate <= currentPeriodDate) {
-                  console.log(`  Skipping ${otherPeriod.month} ${otherPeriod.year} (período anterior)`);
+                  console.log(`${LOG_PREFIX}   Skipping ${otherPeriod.monthName} ${otherPeriod.year} (past period)`);
                   continue;
                 }
                 
@@ -304,9 +294,13 @@ export const FinanceDetailScreen: React.FC = () => {
                   };
                   
                   await repo.updatePeriod(otherPeriod.id, { debts: updatedOtherDebts });
-                  console.log(`  Updated ${otherPeriod.month} ${otherPeriod.year}: remainingAmount = ${otherNewRemaining}, paidThisMonth remains ${otherDebt.paidThisMonth}`);
+                  console.log(`${LOG_PREFIX}   Synced ${otherPeriod.monthName} ${otherPeriod.year}: remainingAmount ${otherDebt.remainingAmount} -> ${otherNewRemaining}`);
+                  syncCount++;
+                } else {
+                  console.log(`${LOG_PREFIX}   ${otherPeriod.monthName} ${otherPeriod.year}: debt not found (may not exist yet)`);
                 }
               }
+              console.log(`${LOG_PREFIX} Payment synced to ${syncCount} future periods`);
               console.log('======= FIN PAGAR DEUDA =======');
               await loadPeriod();
               

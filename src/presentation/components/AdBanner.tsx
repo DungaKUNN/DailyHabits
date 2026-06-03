@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { shouldShowAds, getPremiumStatus } from '../../services/MonetizationService';
 
 interface AdBannerProps {
   onUpgradePress?: () => void;
