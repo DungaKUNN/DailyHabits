@@ -28,6 +28,7 @@ interface WelcomeScreenProps {
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
+  const LOG_PREFIX = '[WelcomeScreen]';
   const [mode, setMode] = useState<'initial' | 'create' | 'join'>('initial');
   const [groupName, setGroupName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -36,13 +37,20 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect - ini`);
     checkExistingGroup();
+    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const checkExistingGroup = async () => {
+    console.log(`${LOG_PREFIX} checkExistingGroup - ini`);
     const code = await getSavedGroupCode();
+    console.log(`${LOG_PREFIX} checkExistingGroup - code: ${code}`);
     if (code) {
+      console.log(`${LOG_PREFIX} checkExistingGroup - hay código, llamando onGroupReady`);
       onGroupReady();
+    } else {
+      console.log(`${LOG_PREFIX} checkExistingGroup - no hay código, mostrando pantalla de inicio`);
     }
   };
 
@@ -76,22 +84,28 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   };
 
   const handleJoinGroup = async () => {
+    console.log('[WelcomeScreen] handleJoinGroup - joinCode:', joinCode);
     if (!joinCode.trim()) {
       Alert.alert('Error', 'Ingresa el código del grupo');
+      console.log('[WelcomeScreen] handleJoinGroup - Código vacío');
       return;
     }
 
     setLoading(true);
+    console.log('[WelcomeScreen] handleJoinGroup - Llamando joinGroup con:', joinCode.trim());
     try {
       const result = await joinGroup(joinCode.trim());
+      console.log('[WelcomeScreen] handleJoinGroup - Resultado:', result);
       if (result.success) {
         setCreatedCode(joinCode.trim().toUpperCase());
         setShowSuccess(true);
+        console.log('[WelcomeScreen] handleJoinGroup - Éxito, showSuccess:', true);
       } else {
         Alert.alert('Error', result.error || 'Código inválido');
+        console.log('[WelcomeScreen] handleJoinGroup - Error:', result.error);
       }
     } catch (error) {
-      console.error('Error joining group:', error);
+      console.error('[WelcomeScreen] Error joining group:', error);
       Alert.alert('Error', 'No se pudo unir al grupo');
     }
     setLoading(false);
@@ -109,10 +123,12 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   };
 
   const handleContinue = () => {
+    console.log('[WelcomeScreen] handleContinue - Llamando onGroupReady');
     onGroupReady();
   };
 
   if (showSuccess) {
+    console.log('[WelcomeScreen] Render - showSuccess:', showSuccess, 'createdCode:', createdCode);
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
@@ -125,8 +141,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
           <Text style={styles.successSubtitle}>Tu grupo está configurado</Text>
           
           <View style={styles.codeContainer}>
-            <Text style={styles.codeLabel}>Código del grupo:</Text>
-            <Text style={styles.codeValue}>{createdCode}</Text>
+            <Text style={styles.codeLabel}>Código del grupo: {createdCode || 'SIN CÓDIGO'}</Text>
+            <Text style={styles.codeValue}>{createdCode || '----'}</Text>
           </View>
 
           <TouchableOpacity style={styles.shareButton} onPress={handleShareCode}>
@@ -148,43 +164,49 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   if (mode === 'create') {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#2196F3" />
+        <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
         <LinearGradient
-          colors={['#2196F3', '#1565C0']}
+          colors={['#4CAF50', '#388E3C']}
           style={styles.formContainer}
         >
-          <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
-            <Text style={styles.backButtonText}>← Volver</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.formIcon}>🏠</Text>
-          <Text style={styles.formTitle}>Crear grupo</Text>
-          <Text style={styles.formSubtitle}>
-            Crea un grupo para tu casa y comparte el código con tu familia
-          </Text>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Nombre del grupo</Text>
-            <TextInput
-              style={styles.input}
-              value={groupName}
-              onChangeText={setGroupName}
-              placeholder="Ej: Casa Familia López"
-              placeholderTextColor="#999"
-            />
+          <View style={styles.formHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
+              <Text style={styles.backButtonText}>← Volver</Text>
+            </TouchableOpacity>
+            
+            <View style={styles.formIconContainer}>
+              <Text style={styles.formIcon}>🏠</Text>
+            </View>
+            <Text style={styles.formTitle}>Crear grupo familiar</Text>
+            <Text style={styles.formSubtitle}>
+              Crea un grupo para gestionar los gastos de tu hogar
+            </Text>
           </View>
 
-          <TouchableOpacity 
-            style={styles.submitButton} 
-            onPress={handleCreateGroup}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.submitButtonText}>Crear grupo</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.formBody}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Nombre de tu familia</Text>
+              <TextInput
+                style={styles.input}
+                value={groupName}
+                onChangeText={setGroupName}
+                placeholder="Ej: Familia López"
+                placeholderTextColor="#999"
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={styles.submitButton} 
+              onPress={handleCreateGroup}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.submitButtonText}>✅ Crear grupo</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </LinearGradient>
       </View>
     );
@@ -198,40 +220,49 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
           colors={['#9C27B0', '#7B1FA2']}
           style={styles.formContainer}
         >
-          <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
-            <Text style={styles.backButtonText}>← Volver</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.formIcon}>🔗</Text>
-          <Text style={styles.formTitle}>Unirse a grupo</Text>
-          <Text style={styles.formSubtitle}>
-            Ingresa el código que te compartieron
-          </Text>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Código del grupo</Text>
-            <TextInput
-              style={styles.input}
-              value={joinCode}
-              onChangeText={setJoinCode}
-              placeholder="Ej: ABCD1234"
-              placeholderTextColor="#999"
-              autoCapitalize="characters"
-              maxLength={8}
-            />
+          <View style={styles.formHeader}>
+            <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
+              <Text style={styles.backButtonText}>← Volver</Text>
+            </TouchableOpacity>
+            
+            <View style={styles.formIconContainer}>
+              <Text style={styles.formIcon}>🔗</Text>
+            </View>
+            <Text style={styles.formTitle}>Unirse a un grupo</Text>
+            <Text style={styles.formSubtitle}>
+              Ingresa el código que te compartió tu familia
+            </Text>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.submitButton, styles.submitButtonPurple]} 
-            onPress={handleJoinGroup}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.submitButtonText}>Unirse</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.formBody}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Código del grupo</Text>
+              <TextInput
+                style={styles.input}
+                value={joinCode}
+                onChangeText={(text) => {
+                  console.log('[WelcomeScreen] Input código - texto:', text);
+                  setJoinCode(text);
+                }}
+                placeholder="Ej: ABCD1234"
+                placeholderTextColor="#999"
+                autoCapitalize="characters"
+                maxLength={8}
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.submitButton, styles.submitButtonPurple]} 
+              onPress={handleJoinGroup}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.submitButtonText}>✅ Unirse al grupo</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </LinearGradient>
       </View>
     );
@@ -343,32 +374,49 @@ const styles = StyleSheet.create({
   formContainer: {
     flex: 1,
     padding: 30,
-    paddingTop: 60,
+    paddingTop: 50,
+  },
+  formHeader: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  formBody: {
+    flex: 1,
+    justifyContent: 'center',
   },
   backButton: {
-    marginBottom: 30,
+    marginBottom: 20,
   },
   backButtonText: {
     fontSize: 16,
-    color: colors.primary.main,
+    color: '#fff',
+    fontWeight: '600',
   },
-  formIcon: {
-    fontSize: 60,
-    textAlign: 'center',
+  formIconContainer: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 15,
   },
+  formIcon: {
+    fontSize: 50,
+    textAlign: 'center',
+  },
   formTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   formSubtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
-    marginBottom: 40,
+    lineHeight: 22,
   },
   inputContainer: {
     marginBottom: 30,

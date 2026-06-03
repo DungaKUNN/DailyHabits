@@ -12,6 +12,8 @@ import { FinancePeriod } from '../../domain/entities/Finance';
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const { width } = Dimensions.get('window');
 
+const LOG_PREFIX = '[FinancesTabScreen]';
+
 const FinancesTabScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [financePeriods, setFinancePeriods] = useState<FinancePeriod[]>([]);
@@ -151,7 +153,7 @@ const FinancesTabScreen: React.FC = () => {
       totalIncome,
       totalExpenses,
       totalDebts,
-      total: totalIncome + totalExpenses + totalDebts
+      total: totalIncome - totalExpenses
     };
   };
 
@@ -178,7 +180,7 @@ const FinancesTabScreen: React.FC = () => {
           <View style={styles.periodHeader}>
             <Text style={styles.periodMonth}>{period.monthName} {period.year}</Text>
             <Text style={styles.periodTotal}>
-              {formatCurrency(totalIncome + totalExpenses)}
+              {formatCurrency(totalIncome - totalExpenses)}
             </Text>
           </View>
           

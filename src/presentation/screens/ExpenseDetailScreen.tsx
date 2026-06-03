@@ -39,6 +39,8 @@ type ExpenseDetailRouteParams = {
   };
 };
 
+const LOG_PREFIX = '[ExpenseDetailScreen]';
+
 const ExpenseDetailScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<any>>();
   const route = useRoute<RouteProp<ExpenseDetailRouteParams, 'ExpenseDetail'>>();
@@ -64,6 +66,7 @@ const ExpenseDetailScreen: React.FC = () => {
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadGroupCode();
     loadData();
     Animated.timing(fadeAnim, {
@@ -71,10 +74,13 @@ const ExpenseDetailScreen: React.FC = () => {
       duration: 400,
       useNativeDriver: true,
     }).start();
+    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadGroupCode = async () => {
+    console.log(`${LOG_PREFIX} loadGroupCode - ini`);
     const code = await getSavedGroupCode();
+    console.log(`${LOG_PREFIX} loadGroupCode - code: ${code}`);
     setGroupCode(code);
   };
 
@@ -352,26 +358,34 @@ const ExpenseDetailScreen: React.FC = () => {
   };
 
   const savePeriod = async () => {
+    console.log(`${LOG_PREFIX} savePeriod - ini - period: ${period?.id}, groupCode: ${groupCode}`);
     if (!period || saving) return;
     setSaving(true);
     setHasChanges(false);
     Alert.alert('Guardado', 'Datos actualizados correctamente');
+    console.log(`${LOG_PREFIX} savePeriod - alert mostrado`);
     
     try {
       if (groupCode) {
+        console.log(`${LOG_PREFIX} savePeriod - guardando en cloud`);
         await savePeriodToCloud(groupCode, period);
+        console.log(`${LOG_PREFIX} savePeriod - cloud ok`);
       } else {
+        console.log(`${LOG_PREFIX} savePeriod - guardando en local`);
         const repo = new SQLiteExpenseRepository(getDatabase());
         await repo.updatePeriod(period.id, period);
+        console.log(`${LOG_PREFIX} savePeriod - local ok`);
       }
+      console.log(`${LOG_PREFIX} savePeriod - éxito`);
     } catch (error) {
-      console.error('Error saving period:', error);
+      console.error(`${LOG_PREFIX} savePeriod - error:`, error);
     } finally {
       setSaving(false);
     }
   };
 
   const exportPeriod = async () => {
+    console.log(`${LOG_PREFIX} exportPeriod - ini`);
     if (!period || !settings) return;
     try {
       const totalElectricity = period.floorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);

@@ -53,6 +53,8 @@ const MONTHS = [
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
+const LOG_PREFIX = '[StatisticsScreen]';
+
 const StatisticsScreen: React.FC = () => {
   const navigation = useNavigation<StatisticsScreenNavigationProp>();
   const [activeTab, setActiveTab] = useState<TabType>('summary');

@@ -7,7 +7,10 @@ interface AdBannerProps {
 }
 
 const AdBanner: React.FC<AdBannerProps> = ({ onUpgradePress }) => {
-  const [showBanner, setShowBanner] = useState(false);
+  // Banner de Premium temporalmente desactivado
+  return null;
+
+  /*const [showBanner, setShowBanner] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
@@ -35,7 +38,7 @@ const AdBanner: React.FC<AdBannerProps> = ({ onUpgradePress }) => {
         <Text style={styles.upgradeText}>Ver Más</Text>
       </TouchableOpacity>
     </View>
-  );
+  );*/
 };
 
 const styles = StyleSheet.create({

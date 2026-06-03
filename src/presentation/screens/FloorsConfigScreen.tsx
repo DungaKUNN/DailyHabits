@@ -205,6 +205,8 @@ const FloorInputCard: React.FC<FloorInputProps> = React.memo(({
   );
 });
 
+const LOG_PREFIX = '[FloorsConfigScreen]';
+
 const FloorsConfigScreen: React.FC = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -223,16 +225,22 @@ const FloorsConfigScreen: React.FC = () => {
   const [showCustomIgv, setShowCustomIgv] = useState(false);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadSettings();
+    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadSettings = async () => {
+    console.log(`${LOG_PREFIX} loadSettings - ini`);
     try {
       const code = await getSavedGroupCode();
+      console.log(`${LOG_PREFIX} loadSettings - code: ${code}`);
       setGroupCode(code);
       
       if (code) {
+        console.log(`${LOG_PREFIX} loadSettings - cargando desde cloud`);
         const cloudSettings = await getGroupSettings(code);
+        console.log(`${LOG_PREFIX} loadSettings - cloudSettings: ${!!cloudSettings}`);
         if (cloudSettings && cloudSettings.floors) {
           setSettings(cloudSettings);
           setTariff((cloudSettings.electricityTariffPerKwh ?? 0.66).toString());
@@ -244,6 +252,7 @@ const FloorsConfigScreen: React.FC = () => {
           setShowCustomIgv(hasCustomIgv);
         }
       } else {
+        console.log(`${LOG_PREFIX} loadSettings - cargando desde local`);
         const repo = new SQLiteExpenseRepository(getDatabase());
         const settingsData = await repo.getSettings();
         setSettings(settingsData);

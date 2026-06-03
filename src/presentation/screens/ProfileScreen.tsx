@@ -37,8 +37,11 @@ import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRe
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod } from '../../domain/entities/Finance';
+import { getSavedGroupCode, getSavedGroupName, clearGroupCode } from '../../services/SyncService';
 
 type ProfileNavigationProp = StackNavigationProp<RootStackParamList>;
+
+const LOG_PREFIX = '[ProfileScreen]';
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<ProfileNavigationProp>();
@@ -62,6 +65,8 @@ const ProfileScreen: React.FC = () => {
   const [manualIncome, setManualIncome] = useState('');
   const [manualExpenses, setManualExpenses] = useState('');
   const [additionalPayment, setAdditionalPayment] = useState('');
+  const [groupCode, setGroupCode] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState<string | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -200,16 +205,27 @@ const ProfileScreen: React.FC = () => {
   }, [showSimulatorModal]);
 
   const loadSettings = async () => {
+    console.log(`${LOG_PREFIX} loadSettings - ini`);
     const payment = await getPaymentReminderSettings();
+    console.log(`${LOG_PREFIX} loadSettings - payment loaded`);
     const premium = await getPremiumStatus();
+    console.log(`${LOG_PREFIX} loadSettings - premium: ${premium}`);
+    const code = await getSavedGroupCode();
+    console.log(`${LOG_PREFIX} loadSettings - code: ${code}`);
+    const name = await getSavedGroupName();
+    console.log(`${LOG_PREFIX} loadSettings - name: ${name}`);
     setPaymentSettings(payment);
     setIsPremium(premium);
+    setGroupCode(code);
+    setGroupName(name);
     await loadFinanceData();
+    console.log(`${LOG_PREFIX} loadSettings - fin`);
     setLoading(false);
   };
 
   const loadFinanceData = async () => {
     try {
+      console.log(`${LOG_PREFIX} loadFinanceData - ini`);
       const financeRepo = new SQLiteFinanceRepository(getDatabase());
       const expenseRepo = new SQLiteExpenseRepository(getDatabase());
       
@@ -360,6 +376,7 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleBuyPremium = () => {
+    console.log(`${LOG_PREFIX} handleBuyPremium - ini`);
     Alert.alert(
       '🎉 ¡Únete a Premium!',
       `Versión premium por ${MONETIZATION_CONFIG.PRICES.MONTHLY}/mes\n\n✓ Sin publicidad\n✓ Gráficos avanzados\n✓ Exportar a Excel\n✓ Funciones exclusivas\n\n*Esta es una versión de prueba`,
@@ -368,10 +385,13 @@ const ProfileScreen: React.FC = () => {
         {
           text: '¡Quiero Premium!',
           onPress: async () => {
+            console.log(`${LOG_PREFIX} handleBuyPremium - comprando`);
             const success = await purchasePremium();
+            console.log(`${LOG_PREFIX} handleBuyPremium - success: ${success}`);
             if (success) {
               setIsPremium(true);
               Alert.alert('¡Felicidades!', 'Ahora eres usuario Premium');
+              console.log(`${LOG_PREFIX} handleBuyPremium - premium activado`);
             } else {
               Alert.alert('Error', 'No se pudo completar la compra');
             }
@@ -382,6 +402,7 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleRestorePremium = () => {
+    console.log(`${LOG_PREFIX} handleRestorePremium - ini`);
     Alert.alert(
       'Restaurar compra',
       '¿Restaurar estado Premium de una compra anterior?',
@@ -390,7 +411,9 @@ const ProfileScreen: React.FC = () => {
         {
           text: 'Restaurar',
           onPress: async () => {
+            console.log(`${LOG_PREFIX} handleRestorePremium - restaurando`);
             const success = await restorePurchases();
+            console.log(`${LOG_PREFIX} handleRestorePremium - success: ${success}`);
             if (success) {
               setIsPremium(true);
               Alert.alert('¡Listo!', 'Compra restaurada exitosamente');
@@ -403,7 +426,32 @@ const ProfileScreen: React.FC = () => {
     );
   };
 
+  const handleLeaveGroup = () => {
+    console.log(`${LOG_PREFIX} handleLeaveGroup - ini - group: ${groupName || groupCode}`);
+    Alert.alert(
+      '🚪 Abandonar grupo',
+      `¿Estás seguro de que quieres abandonar el grupo "${groupName || groupCode}"?\n\nPerderás acceso a los datos compartidos de la familia.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Abandonar',
+          style: 'destructive',
+          onPress: async () => {
+            console.log(`${LOG_PREFIX} handleLeaveGroup - confirmando`);
+            await clearGroupCode();
+            console.log(`${LOG_PREFIX} handleLeaveGroup - código limpiado`);
+            setGroupCode(null);
+            setGroupName(null);
+            Alert.alert('Listo', 'Has abandonado el grupo. Ahora puedes crear o unirte a otro.');
+            console.log(`${LOG_PREFIX} handleLeaveGroup - fin`);
+          },
+        },
+      ]
+    );
+  };
+
   const togglePaymentReminders = async (enabled: boolean) => {
+    console.log(`${LOG_PREFIX} togglePaymentReminders - ini - enabled: ${enabled}`);
     if (enabled) {
       const granted = await requestNotificationPermissions();
       if (!granted) {
@@ -761,6 +809,31 @@ const ProfileScreen: React.FC = () => {
               Activa para recibir notificaciones y no olvidar pagar tus recibos.
             </Text>
           </View>
+        )}
+
+        {groupCode && (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>👨‍👩‍👧‍👦 Mi Familia</Text>
+              <Text style={styles.sectionDescription}>
+                Código para compartir con tu familia
+              </Text>
+              <View style={styles.groupCodeCard}>
+                <Text style={styles.groupCodeLabel}>Código del grupo:</Text>
+                <Text style={styles.groupCodeValue}>{groupCode}</Text>
+                {groupName && (
+                  <Text style={styles.groupNameText}>Grupo: {groupName}</Text>
+                )}
+              </View>
+              <TouchableOpacity 
+                style={styles.leaveGroupButton}
+                onPress={handleLeaveGroup}
+              >
+                <Text style={styles.leaveGroupButtonText}>🚪 Abandonar grupo</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         )}
 
         <View style={styles.bottomSpacer} />
@@ -1941,6 +2014,46 @@ const styles = StyleSheet.create({
   },
   modalSpacer: {
     height: 30,
+  },
+  groupCodeCard: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  groupCodeLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  groupCodeValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.primary.main,
+    letterSpacing: 3,
+  },
+  groupNameText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 6,
+  },
+  leaveGroupButton: {
+    backgroundColor: '#ffebee',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginTop: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ef5350',
+  },
+  leaveGroupButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#c62828',
   },
   bottomSpacer: {
     height: 20,

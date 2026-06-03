@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,6 +36,8 @@ export type TabParamList = {
 
 const Tab = createBottomTabNavigator<TabParamList>();
 const Stack = createStackNavigator<RootStackParamList>();
+
+const LOG_PREFIX = '[AppNavigator]';
 
 const TabIcon = ({ name, focused }: { name: string; focused: boolean }) => (
   <Ionicons
@@ -110,13 +113,42 @@ const RootNavigator = () => {
   });
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect - ini`);
     const checkGroup = async () => {
+      console.log(`${LOG_PREFIX} checkGroup - ini`);
       const groupCode = await getSavedGroupCode();
+      console.log(`${LOG_PREFIX} checkGroup - code: ${groupCode}`);
       setHasGroup(!!groupCode);
+      console.log(`${LOG_PREFIX} checkGroup - hasGroup: ${!!groupCode}`);
     };
     checkGroup();
+    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+
+  const handleGroupReady = () => {
+    console.log(`${LOG_PREFIX} handleGroupReady - ini - setting hasGroup=true`);
+    setHasGroup(true);
+    console.log(`${LOG_PREFIX} handleGroupReady - fin - navegado a MainTabs`);
+  };
+
+  const handleNavigateToExpenseDetail = (periodId: string) => {
+    console.log(`${LOG_PREFIX} navigate - ExpenseDetail - periodId: ${periodId}`);
+    navigation.navigate('ExpenseDetail', { periodId });
+  };
+
+  const handleNavigateToFinanceDetail = (periodId: string) => {
+    console.log(`${LOG_PREFIX} navigate - FinanceDetail - periodId: ${periodId}`);
+    navigation.navigate('FinanceDetail', { periodId });
+  };
+
+  const handleNavigateToFloorsConfig = () => {
+    console.log(`${LOG_PREFIX} navigate - FloorsConfig`);
+    navigation.navigate('FloorsConfig');
+  };
+
+  console.log(`${LOG_PREFIX} RootNavigator - render - hasGroup: ${hasGroup}`);
   if (hasGroup === null) return null;
 
   return (
@@ -130,9 +162,10 @@ const RootNavigator = () => {
       {!hasGroup ? (
         <Stack.Screen
           name="Welcome"
-          component={WelcomeScreenWrapper}
           options={{ headerShown: false }}
-        />
+        >
+          {() => <WelcomeScreen onGroupReady={handleGroupReady} />}
+        </Stack.Screen>
       ) : (
         <Stack.Screen
           name="MainTabs"
@@ -157,10 +190,6 @@ const RootNavigator = () => {
       />
     </Stack.Navigator>
   );
-};
-
-const WelcomeScreenWrapper = () => {
-  return <WelcomeScreen onGroupReady={() => {}} />;
 };
 
 export const AppNavigator = () => {

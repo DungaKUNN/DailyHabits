@@ -38,6 +38,8 @@ const MONTHS = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+const LOG_PREFIX = '[ExpensesScreen]';
+
 const ExpensesScreen: React.FC = () => {
   const navigation = useNavigation<ExpensesScreenNavigationProp>();
   const [periods, setPeriods] = useState<ExpensePeriod[]>([]);
@@ -68,32 +70,42 @@ const ExpensesScreen: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect [] - ini`);
     initScreen();
+    console.log(`${LOG_PREFIX} useEffect [] - fin`);
   }, []);
 
   const initScreen = async () => {
+    console.log(`${LOG_PREFIX} initScreen - ini`);
     setIsLoading(true);
     const code = await getSavedGroupCode();
+    console.log(`${LOG_PREFIX} initScreen - code: ${code}`);
     const name = await getSavedGroupName();
+    console.log(`${LOG_PREFIX} initScreen - name: ${name}`);
     
     if (code) {
+      console.log(`${LOG_PREFIX} initScreen - hay código, cargando desde cloud`);
       setGroupCode(code);
       setGroupName(name || 'Mi Grupo');
       
       const unsubPeriods = subscribeToPeriods(code, (cloudPeriods) => {
+        console.log(`${LOG_PREFIX} initScreen - subscribeToPeriods callback - periods: ${cloudPeriods.length}`);
         setPeriods(cloudPeriods);
         setIsLoading(false);
       });
       
       const unsubSettings = subscribeToSettings(code, (cloudSettings) => {
+        console.log(`${LOG_PREFIX} initScreen - subscribeToSettings callback`);
         if (cloudSettings) setSettings(cloudSettings);
       });
       
       const cloudPeriods = await getPeriodsFromCloud(code);
+      console.log(`${LOG_PREFIX} initScreen - cloudPeriods: ${cloudPeriods.length}`);
       setPeriods(cloudPeriods);
       setIsLoading(false);
       
       return () => {
+        console.log(`${LOG_PREFIX} initScreen - cleanup`);
         unsubPeriods();
         unsubSettings();
       };
@@ -124,11 +136,14 @@ const ExpensesScreen: React.FC = () => {
   };
 
   const createNewPeriod = async () => {
+    console.log(`${LOG_PREFIX} createNewPeriod - ini - month: ${selectedMonth + 1}, year: ${selectedYear}`);
     try {
       const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
+      console.log(`${LOG_PREFIX} createNewPeriod - monthStr: ${monthStr}`);
       
       const existing = periods.find(p => p.month === monthStr);
       if (existing) {
+        console.log(`${LOG_PREFIX} createNewPeriod - ya existe`);
         Alert.alert('Error', 'Ya existe un registro para este mes');
         return;
       }

@@ -16,6 +16,8 @@ const DEBT_TYPES = ['Tarjeta de crédito', 'Préstamo personal', 'Hipoteca', 'Pr
 
 type FinanceDetailRouteProp = RouteProp<{ FinanceDetail: { periodId: string } }, 'FinanceDetail'>;
 
+const LOG_PREFIX = '[FinanceDetailScreen]';
+
 export const FinanceDetailScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute<FinanceDetailRouteProp>();
@@ -40,25 +42,27 @@ export const FinanceDetailScreen: React.FC = () => {
   const [showDebtPayModal, setShowDebtPayModal] = useState(false);
 
   useEffect(() => {
+    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadPeriod();
+    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadPeriod = async () => {
+    console.log(`${LOG_PREFIX} loadPeriod - ini - periodId: ${periodId}`);
     try {
       const repo = new SQLiteFinanceRepository(getDatabase());
       const p = await repo.getPeriodById(periodId);
+      console.log(`${LOG_PREFIX} loadPeriod - found: ${!!p}`);
       if (p) {
-        console.log('======= loadPeriod (FinanceDetailScreen) =======');
-        console.log('Period loaded:', p.month, p.year);
-        console.log('Income items:', JSON.stringify(p.income.map(i => ({ source: i.source, amount: i.amount }))));
-        console.log('Expense items:', JSON.stringify(p.expenses.map(e => ({ category: e.category, amount: e.amount }))));
-        console.log('Debt items:', JSON.stringify(p.debts.map(d => ({ name: d.name, totalAmount: d.totalAmount, remainingAmount: d.remainingAmount, isPaid: d.isPaid }))));
-        console.log('Savings:', p.savings);
-        console.log('======= FIN loadPeriod =======');
+        console.log(`${LOG_PREFIX} loadPeriod - period: ${p.month} ${p.year}`);
+        console.log(`${LOG_PREFIX} loadPeriod - income: ${p.income.length} items`);
+        console.log(`${LOG_PREFIX} loadPeriod - expenses: ${p.expenses.length} items`);
+        console.log(`${LOG_PREFIX} loadPeriod - debts: ${p.debts.length} items`);
+        console.log(`${LOG_PREFIX} loadPeriod - savings: ${p.savings}`);
         setPeriod(p);
       }
     } catch (error) {
-      console.error('Error loading period:', error);
+      console.error(`${LOG_PREFIX} loadPeriod - error:`, error);
     }
   };
 

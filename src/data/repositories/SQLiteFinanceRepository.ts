@@ -8,17 +8,20 @@ import {
   DEFAULT_FINANCE_SETTINGS 
 } from '../../domain/entities/Finance';
 
+const LOG_PREFIX = '[SQLiteFinanceRepo]';
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
 export class SQLiteFinanceRepository {
   private db: SQLite.SQLiteDatabase;
 
   constructor(db: SQLite.SQLiteDatabase) {
+    console.log(`${LOG_PREFIX} constructor`);
     this.db = db;
     this.init();
   }
 
   private async init() {
+    console.log(`${LOG_PREFIX} init - creating tables`);
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS finance_periods (
         id TEXT PRIMARY KEY,
@@ -46,21 +49,26 @@ export class SQLiteFinanceRepository {
   }
 
   async getAllPeriods(): Promise<FinancePeriod[]> {
+    console.log(`${LOG_PREFIX} getAllPeriods - ini`);
     const rows = await this.db.getAllAsync<any>('SELECT * FROM finance_periods ORDER BY year ASC, month ASC');
+    console.log(`${LOG_PREFIX} getAllPeriods - rows: ${rows.length}`);
     return rows.map(row => this.mapRowToPeriod(row));
   }
 
   async getPeriodById(id: string): Promise<FinancePeriod | null> {
+    console.log(`${LOG_PREFIX} getPeriodById - id: ${id}`);
     const row = await this.db.getFirstAsync<any>('SELECT * FROM finance_periods WHERE id = ?', id);
     return row ? this.mapRowToPeriod(row) : null;
   }
 
   async getPeriodByMonth(month: string): Promise<FinancePeriod | null> {
+    console.log(`${LOG_PREFIX} getPeriodByMonth - month: ${month}`);
     const row = await this.db.getFirstAsync<any>('SELECT * FROM finance_periods WHERE month = ?', month);
     return row ? this.mapRowToPeriod(row) : null;
   }
 
   async createPeriod(period: Omit<FinancePeriod, 'id' | 'createdAt' | 'updatedAt'>): Promise<FinancePeriod> {
+    console.log(`${LOG_PREFIX} createPeriod - ini - month: ${period.month}, year: ${period.year}`);
     const id = generateId();
     const now = new Date().toISOString();
 
@@ -95,6 +103,7 @@ export class SQLiteFinanceRepository {
   }
 
   async updatePeriod(id: string, period: Partial<FinancePeriod>): Promise<FinancePeriod> {
+    console.log(`${LOG_PREFIX} updatePeriod - ini - id: ${id}`);
     const existing = await this.getPeriodById(id);
     if (!existing) throw new Error('Period not found');
 
@@ -139,12 +148,16 @@ export class SQLiteFinanceRepository {
   }
 
   async deletePeriod(id: string): Promise<void> {
+    console.log(`${LOG_PREFIX} deletePeriod - ini - id: ${id}`);
     await this.db.runAsync('DELETE FROM finance_periods WHERE id = ?', id);
+    console.log(`${LOG_PREFIX} deletePeriod - ok`);
   }
 
   async getSettings(): Promise<FinanceSettings> {
+    console.log(`${LOG_PREFIX} getSettings - ini`);
     const row = await this.db.getFirstAsync<any>('SELECT * FROM finance_settings WHERE id = "settings"');
     if (!row) {
+      console.log(`${LOG_PREFIX} getSettings - default`);
       return DEFAULT_FINANCE_SETTINGS;
     }
 

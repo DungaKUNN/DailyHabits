@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 import { getNotificationSettings } from './SettingsService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const LOG_PREFIX = '[NotificationService]';
+
 let isInitialized = false;
 
 const PAYMENT_REMINDER_KEY = '@payment_reminders_enabled';
@@ -40,12 +42,16 @@ const getRandomMessage = (type: string): string => {
 };
 
 const initNotifications = async () => {
-  if (isInitialized) return;
+  console.log(`${LOG_PREFIX} initNotifications - ini - isInitialized: ${isInitialized}`);
+  if (isInitialized) {
+    console.log(`${LOG_PREFIX} initNotifications - ya inicializado`);
+    return;
+  }
   
   try {
+    console.log(`${LOG_PREFIX} initNotifications - configurando handler`);
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: false,
         shouldShowBanner: true,
