@@ -1,134 +1,113 @@
-# MíComida - Tu Compañero de Nutrición
+# CasaBalance
 
-Aplicación móvil para planificar y seguir hábitos alimenticios diarios (desayuno, almuerzo, cena).
+Aplicación móvil para gestión de gastos del hogar. Divide recibos de luz y agua por pisos, controla finanzas personales (ingresos, gastos, deudas, ahorros) y sincroniza todo en la nube con tu grupo familiar.
 
-## Arquitectura Clean
+## Stack
+
+- **Framework:** React Native (Expo SDK 54)
+- **Lenguaje:** TypeScript
+- **Navegación:** React Navigation (Stack + Bottom Tabs)
+- **BD Local:** SQLite (expo-sqlite)
+- **Cloud:** Firebase Firestore
+- **Notificaciones:** expo-notifications
+- **UI:** Componentes nativos + LinearGradient
+
+## Arquitectura
 
 ```
 src/
-├── domain/           # Lógica de negocio pura
-│   ├── entities/     # Modelos (Meal, DailyPlan, Habit)
-│   ├── repositories/ # Interfaces de repositorios
-│   └── usecases/     # Casos de uso
-├── data/             # Implementación de datos
-│   ├── repositories/ # Implementaciones SQLite
-│   └── Database.ts   # Configuración de BD
-└── presentation/     # UI
-    ├── screens/      # Pantallas
-    ├── components/   # Componentes reutilizables
-    └── navigation/   # Configuración de navegación
+├── domain/           # Entidades e interfaces
+│   ├── entities/     # Expense, Finance
+│   └── repositories/ # Interfaces de repositorios
+├── data/             # Datos
+│   ├── Database.ts   # Inicialización SQLite
+│   └── repositories/ # SQLiteExpenseRepository, SQLiteFinanceRepository
+├── presentation/     # UI
+│   ├── screens/      # 8 pantallas
+│   ├── components/   # Componentes reutilizables
+│   ├── navigation/   # AppNavigator (Stack + Tabs)
+│   └── theme/        # Colores y estilos globales
+└── services/         # Firebase, Sync, Notificaciones, Premium
 ```
 
-## Características
+## Funcionalidades
 
-✅ Planificación de comidas (desayuno, almuerzo, cena)
-✅ Calendario semanal con navegación
-✅ Marcar comidas como completadas
-✅ Seguimiento de calorías
-✅ Funciona 100% offline (SQLite local)
-✅ Notificaciones (próximamente)
-✅ Estadísticas de progreso
+### 👨‍👩‍👧‍👦 Gestión de Grupos
+- Crear grupo familiar con código único
+- Unirse a un grupo existente con código
+- Compartir código vía WhatsApp, etc.
+- Migrar datos locales a la nube al crear grupo
 
-## Instalación y Uso
+### 💡 Gastos (Luz y Agua)
+- Registro de recibos de luz y agua por período
+- Configuración de pisos y tarifas (tarifa por kWh, IGV, porcentaje de agua)
+- Cálculo automático de distribución entre pisos
+- Lecturas de medidor por piso
+- Gastos adicionales y otros ingresos
 
-### Opción 1: Prueba en tu teléfono con Expo Go (GRATIS)
+### 💰 Finanzas
+- Ingresos por fuente (Salario, Freelance, Inversiones, etc.)
+- Gastos por categoría (Vivienda, Alimentación, Transporte, etc.)
+- Deudas con cálculo de cuotas mensuales
+- Ahorros
+- Balance mensual: `Ingresos - Gastos - Deudas`
 
-1. **En tu computadora:**
+### 📊 Estadísticas
+- KPIs: ingresos totales, gastos totales, ahorros, deudas
+- Gráfico de barras: Ingresos vs Gastos por mes
+- Gráfico de pastel: Gastos por categoría
+- Gráfico de tendencia de balance
+- Seguimiento de deudas: progreso de pago, resumen por período
+
+### 🔄 Sincronización Cloud
+- Firebase Firestore como backend
+- Sincronización en tiempo real entre dispositivos del grupo
+- Suscripción a cambios de períodos y configuraciones
+
+### ⭐ Premium
+- Premium activo hasta 2026-06-14
+- Sin anuncios
+- Funciones extras
+
+### 🔔 Recordatorios
+- Recordatorios programables de pago de recibos
+- Notificaciones push (día y hora configurables)
+- Soporte para múltiples días del mes
+
+### 🏦 Simulador de Deudas
+- Calcula capacidad de pago mensual
+- Proyección de pago de deudas vs ingresos y gastos
+
+## Pantallas
+
+| Pantalla | Ruta | Descripción |
+|----------|------|-------------|
+| Welcome | Stack | Crear o unirse a un grupo |
+| Gastos | Tab | Lista de períodos de Luz/Agua |
+| ExpenseDetail | Stack | Detalle de período: lecturas, recibos, distribución |
+| Finanzas | Tab | Lista de períodos financieros |
+| FinanceDetail | Stack | Ingresos, gastos, deudas, ahorros |
+| Estadísticas | Tab | Gráficos, KPIs, simulador |
+| Perfil | Tab | Configuración, premium, notificaciones, grupo |
+| FloorsConfig | Stack | Configurar pisos y tarifas |
+
+## Instalación
+
 ```bash
-cd MíComida
 npm install
 npx expo start
 ```
 
-2. **En tu iPhone:**
-   - Descarga la app **"Expo Go"** desde App Store
-   - Escanea el código QR que aparece en tu terminal
+Escanea el QR con Expo Go en tu teléfono.
 
-3. **En tu Android:**
-   - Descarga **"Expo Go"** desde Play Store
-   - Escanea el código QR o ingresa la URL manualmente
+## Estructura de Datos
 
-### Opción 2: Generar APK para Android
+### ExpensePeriod
+- Mes/año, recibos de luz y agua, lecturas por piso, distribución, gastos adicionales, ingresos
 
-```bash
-# Instala EAS CLI
-npm install -g eas-cli
-
-# Configura tu cuenta (gratis)
-eas login
-
-# Genera APK
-eas build --platform android --profile preview
-
-# Descarga el APK y instálalo en tu teléfono
-```
-
-### Opción 3: Subir a App Store (requiere Mac)
-
-1. Necesitas una Mac para compilar para iOS
-2. Cuenta de Apple Developer: $99/año
-3. O usa EAS Build: ~$29/mes para builds en la nube
-
-## Desarrollo
-
-### Primeros pasos
-
-```bash
-# Instalar dependencias
-npm install
-
-# Iniciar servidor de desarrollo
-npx expo start
-```
-
-### Estructura de datos
-
-**Meal (Comida):**
-- id: string
-- type: 'breakfast' | 'lunch' | 'dinner'
-- name: string
-- description?: string
-- calories?: number
-- completed: boolean
-- scheduledTime: string
-
-**DailyPlan (Plan Diario):**
-- id: string (fecha YYYY-MM-DD)
-- date: string
-- meals: Meal[]
-- notes?: string
-
-## Costos
-
-| Servicio | Costo |
-|----------|-------|
-| Desarrollo local | $0 |
-| Expo Go (pruebas) | $0 |
-| Play Store (publicar) | $25 único |
-| App Store (publicar) | $99/año |
-| Firebase (opcional) | $0 hasta 10k usuarios |
-
-## Próximas funcionalidades (Monetización)
-
-- [ ] Planes nutricionales premium
-- [ ] Recetas ilimitadas
-- [ ] Exportar a PDF
-- [ ] Sincronización en la nube
-- [ ] Estadísticas avanzadas
-- [ ] Recordatorios personalizados
-
-## Tecnologías
-
-- **Frontend:** React Native + TypeScript
-- **Navegación:** React Navigation
-- **Base de datos:** SQLite (expo-sqlite)
-- **UI:** Componentes nativos + StyleSheet
-- **Fechas:** date-fns
+### FinancePeriod
+- Mes/año, ingresos (fuente + monto), gastos (categoría + monto), deudas (cuotas), ahorros
 
 ## Licencia
 
-MIT - Libre para usar y modificar
-
----
-
-**Desarrollado con ❤️ para mejorar hábitos alimenticios**
+MIT
