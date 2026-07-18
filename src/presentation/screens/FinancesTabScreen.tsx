@@ -158,7 +158,7 @@ const FinancesTabScreen: React.FC = () => {
       totalIncome,
       totalExpenses,
       totalDebts,
-      total: totalIncome - totalExpenses
+      total: totalIncome - totalExpenses - totalDebts
     };
   };
 
@@ -185,7 +185,7 @@ const FinancesTabScreen: React.FC = () => {
           <View style={styles.periodHeader}>
             <Text style={styles.periodMonth}>{period.monthName} {period.year}</Text>
             <Text style={styles.periodTotal}>
-              {formatCurrency(totalIncome - totalExpenses)}
+              {formatCurrency(totalIncome - totalExpenses - totalDebts)}
             </Text>
           </View>
           
