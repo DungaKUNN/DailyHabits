@@ -64,11 +64,6 @@ src/
 - Sincronización en tiempo real entre dispositivos del grupo
 - Suscripción a cambios de períodos y configuraciones
 
-### ⭐ Premium
-- Premium activo hasta 2026-06-14
-- Sin anuncios
-- Funciones extras
-
 ### 🔔 Recordatorios
 - Recordatorios programables de pago de recibos
 - Notificaciones push (día y hora configurables)
@@ -108,6 +103,3 @@ Escanea el QR con Expo Go en tu teléfono.
 ### FinancePeriod
 - Mes/año, ingresos (fuente + monto), gastos (categoría + monto), deudas (cuotas), ahorros
 
-## Licencia
-
-MIT
