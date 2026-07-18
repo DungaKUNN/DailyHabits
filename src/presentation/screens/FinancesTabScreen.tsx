@@ -8,8 +8,7 @@ import { colors } from '../theme/colors';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod } from '../../domain/entities/Finance';
-
-const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+import { formatCurrency, MONTHS } from '../../utils/formatting';
 const { width } = Dimensions.get('window');
 
 const LOG_PREFIX = '[FinancesTabScreen]';
@@ -147,8 +146,6 @@ const FinancesTabScreen: React.FC = () => {
       console.error('Error creating period:', error);
     }
   };
-
-  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const getTotals = (period: FinancePeriod) => {
     const totalIncome = period.income.reduce((sum, i) => sum + i.amount, 0);

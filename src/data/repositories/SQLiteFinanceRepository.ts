@@ -7,11 +7,12 @@ import {
   FinanceDebt,
   DEFAULT_FINANCE_SETTINGS 
 } from '../../domain/entities/Finance';
+import { IFinanceRepository } from '../../domain/repositories/IFinanceRepository';
+import { generateId } from '../../utils/formatting';
 
 const LOG_PREFIX = '[SQLiteFinanceRepo]';
-const generateId = () => Math.random().toString(36).substring(2, 15);
 
-export class SQLiteFinanceRepository {
+export class SQLiteFinanceRepository implements IFinanceRepository {
   private db: SQLite.SQLiteDatabase;
 
   constructor(db: SQLite.SQLiteDatabase) {
@@ -177,7 +178,7 @@ export class SQLiteFinanceRepository {
   async updateSettings(settings: FinanceSettings): Promise<void> {
     await this.db.runAsync(
       `INSERT OR REPLACE INTO finance_settings (id, incomeSources, expenseCategories, expenseSubcategories)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?)`,
       'settings',
       JSON.stringify(settings.incomeSources),
       JSON.stringify(settings.expenseCategories),

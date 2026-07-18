@@ -1,9 +1,9 @@
 import { ExpensePeriod, ExpenseSettings, Floor, FloorElectricityReading, FloorWaterCost, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_SOURCES } from '../../domain/entities/Expense';
 import { IExpenseRepository } from '../../domain/repositories/IExpenseRepository';
+import { generateId } from '../../utils/formatting';
 import * as SQLite from 'expo-sqlite';
 
 const LOG_PREFIX = '[SQLiteExpenseRepo]';
-const generateId = () => Math.random().toString(36).substring(2, 15);
 
 export class SQLiteExpenseRepository implements IExpenseRepository {
   private db: SQLite.SQLiteDatabase;

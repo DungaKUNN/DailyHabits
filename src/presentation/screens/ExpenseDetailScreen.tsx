@@ -32,6 +32,7 @@ import { colors } from '../theme/colors';
 import { storage } from '../../services/firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { DecimalInput } from '../components/DecimalInput';
+import { formatCurrency } from '../../utils/formatting';
 
 type ExpenseDetailRouteParams = {
   ExpenseDetail: {
@@ -682,8 +683,6 @@ const ExpenseDetailScreen: React.FC = () => {
       });
     }
   };
-
-  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) {
     return (

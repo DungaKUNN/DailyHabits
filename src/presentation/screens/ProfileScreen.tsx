@@ -59,7 +59,6 @@ const ProfileScreen: React.FC = () => {
     monthlyPayment: number;
     debts?: { totalAmount: number; remainingAmount: number; monthlyPayment: number; periodIndex: number }[];
   } | null>(null);
-  const [selectedPercentage, setSelectedPercentage] = useState(20);
   const [showSimulatorModal, setShowSimulatorModal] = useState(false);
   const [detailedData, setDetailedData] = useState<any[]>([]);
   const [manualIncome, setManualIncome] = useState('');

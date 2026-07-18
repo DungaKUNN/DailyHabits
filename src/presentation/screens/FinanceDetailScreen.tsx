@@ -7,8 +7,7 @@ import { colors } from '../theme/colors';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod, FinanceIncome, FinanceExpense, FinanceDebt } from '../../domain/entities/Finance';
-
-const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+import { formatCurrency, MONTHS } from '../../utils/formatting';
 
 const INCOME_SOURCES = ['Salario', 'Freelance', 'Inversión', 'Bono', 'Comisiones', 'Pensión', 'Otro'];
 const EXPENSE_CATEGORIES = ['Alquiler', 'Servicios', 'Comida', 'Transporte', 'Entretenimiento', 'Salud', 'Educación', 'Ropa', 'Otros'];
@@ -414,8 +413,6 @@ export const FinanceDetailScreen: React.FC = () => {
   const totalDebtRemaining = period.debts.reduce((sum, d) => sum + d.remainingAmount, 0);
   const totalSavings = period.savings || 0;
   const balance = totalIncome - totalExpenses - totalDebts;
-
-  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <View style={styles.container}>

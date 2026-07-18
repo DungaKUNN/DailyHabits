@@ -1,5 +1,4 @@
 import * as SQLite from 'expo-sqlite';
-import { SQLiteExpenseRepository } from './repositories/SQLiteExpenseRepository';
 
 const LOG_PREFIX = '[Database]';
 
@@ -23,9 +22,4 @@ export const getDatabase = (): SQLite.SQLiteDatabase => {
   if (!db) throw new Error('Database not initialized. Call initDatabase() first.');
   console.log(`${LOG_PREFIX} getDatabase - ok`);
   return db;
-};
-
-export const getExpenseRepository = (): SQLiteExpenseRepository => {
-  console.log(`${LOG_PREFIX} getExpenseRepository - ini`);
-  return new SQLiteExpenseRepository(getDatabase());
 };

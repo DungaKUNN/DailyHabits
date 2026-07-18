@@ -71,8 +71,3 @@ export const typography = {
     fontWeight: 'normal' as const,
   },
 };
-
-export type ThemeColors = typeof colors;
-export type ThemeSpacing = typeof spacing;
-export type ThemeBorderRadius = typeof borderRadius;
-export type ThemeTypography = typeof typography;

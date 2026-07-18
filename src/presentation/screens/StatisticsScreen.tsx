@@ -23,6 +23,7 @@ import { getDatabase } from '../../data/Database';
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getSavedGroupCode, getPeriodsFromCloud } from '../../services/SyncService';
+import { formatCurrency, MONTHS } from '../../utils/formatting';
 
 type TimeRange = 'month' | 'all';
 type TabType = 'summary' | 'expenses' | 'finance';
@@ -45,11 +46,6 @@ interface ExpenseStats {
 }
 
 type StatisticsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'MainTabs'>;
-
-const MONTHS = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre'
-];
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -411,7 +407,6 @@ const StatisticsScreen: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatPercent = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)}%`;
 
   const SimpleBarChart: React.FC<{

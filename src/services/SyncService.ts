@@ -17,6 +17,22 @@ const GROUP_NAME_KEY = '@group_name';
 
 const LOG_PREFIX = '[SyncService]';
 
+const cleanValue = (value: any): any => {
+  if (value === undefined) return undefined;
+  if (value === null) return undefined;
+  if (Array.isArray(value)) {
+    const cleaned = value.map(cleanValue).filter(v => v !== undefined);
+    return cleaned.length > 0 ? cleaned : undefined;
+  }
+  if (typeof value === 'object') {
+    const cleaned = Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, cleanValue(v)]).filter(([_, v]) => v !== undefined)
+    );
+    return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+  }
+  return value;
+};
+
 export const generateGroupCode = (): string => {
   console.log(`${LOG_PREFIX} generateGroupCode`);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -153,22 +169,6 @@ export const updateGroupSettings = async (code: string, settings: ExpenseSetting
     console.log(`${LOG_PREFIX} updateGroupSettings - ini - code: ${code}`);
     const groupRef = doc(db, 'groups', code);
     
-    const cleanValue = (value: any): any => {
-      if (value === undefined) return undefined;
-      if (value === null) return undefined;
-      if (Array.isArray(value)) {
-        const cleaned = value.map(cleanValue).filter(v => v !== undefined);
-        return cleaned.length > 0 ? cleaned : undefined;
-      }
-      if (typeof value === 'object') {
-        const cleaned = Object.fromEntries(
-          Object.entries(value).map(([k, v]) => [k, cleanValue(v)]).filter(([_, v]) => v !== undefined)
-        );
-        return Object.keys(cleaned).length > 0 ? cleaned : undefined;
-      }
-      return value;
-    };
-    
     const cleanSettings = cleanValue(settings);
     if (cleanSettings) {
       await setDoc(groupRef, { settings: cleanSettings }, { merge: true });
@@ -183,22 +183,6 @@ export const savePeriodToCloud = async (groupCode: string, period: ExpensePeriod
   console.log(`${LOG_PREFIX} savePeriodToCloud - ini - groupCode: ${groupCode}, period: ${period.id}`);
   try {
     const periodRef = doc(db, 'groups', groupCode, 'periods', period.id);
-    
-    const cleanValue = (value: any): any => {
-      if (value === undefined) return undefined;
-      if (value === null) return undefined;
-      if (Array.isArray(value)) {
-        const cleaned = value.map(cleanValue).filter(v => v !== undefined);
-        return cleaned.length > 0 ? cleaned : undefined;
-      }
-      if (typeof value === 'object') {
-        const cleaned = Object.fromEntries(
-          Object.entries(value).map(([k, v]) => [k, cleanValue(v)]).filter(([_, v]) => v !== undefined)
-        );
-        return Object.keys(cleaned).length > 0 ? cleaned : undefined;
-      }
-      return value;
-    };
     
     const cleanPeriod = cleanValue(period);
     if (cleanPeriod) {

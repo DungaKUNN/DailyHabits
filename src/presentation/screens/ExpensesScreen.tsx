@@ -20,6 +20,7 @@ import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRe
 import { getDatabase } from '../../data/Database';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
+import { formatCurrency, MONTHS } from '../../utils/formatting';
 import {
   getSavedGroupCode,
   getSavedGroupName,
@@ -29,14 +30,8 @@ import {
   subscribeToPeriods,
   subscribeToSettings,
 } from '../../services/SyncService';
-import AdBanner from '../components/AdBanner';
 
 type ExpensesScreenNavigationProp = StackNavigationProp<RootStackParamList, 'MainTabs'>;
-
-const MONTHS = [
-  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-];
 
 const LOG_PREFIX = '[ExpensesScreen]';
 
@@ -118,20 +113,6 @@ const ExpensesScreen: React.FC = () => {
       setPeriods(periodsData);
       setSettings(settingsData);
       setIsLoading(false);
-    }
-  };
-
-  const loadDataLocal = async () => {
-    try {
-      const repo = new SQLiteExpenseRepository(getDatabase());
-      const [periodsData, settingsData] = await Promise.all([
-        repo.getAllPeriods(),
-        repo.getSettings(),
-      ]);
-      setPeriods(periodsData);
-      setSettings(settingsData);
-    } catch (error) {
-      console.error('Error loading local data:', error);
     }
   };
 
@@ -284,8 +265,6 @@ const ExpensesScreen: React.FC = () => {
       console.error('Error sharing:', error);
     }
   };
-
-  const formatCurrency = (amount: number) => `S/ ${amount.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const getTotalElectricity = (period: ExpensePeriod) => {
     return period.floorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);
@@ -501,8 +480,6 @@ const ExpensesScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-
-      <AdBanner />
     </View>
   );
 };
