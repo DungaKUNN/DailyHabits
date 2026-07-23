@@ -5,7 +5,6 @@ import {
   setDoc, 
   getDoc, 
   getDocs, 
-  onSnapshot,
   deleteDoc,
   Timestamp 
 } from 'firebase/firestore';
@@ -234,50 +233,6 @@ export const deletePeriodFromCloud = async (groupCode: string, periodId: string)
   } catch (error) {
     console.error(`${LOG_PREFIX} deletePeriodFromCloud - error:`, error);
   }
-};
-
-export const subscribeToPeriods = (
-  groupCode: string, 
-  callback: (periods: ExpensePeriod[]) => void
-): (() => void) => {
-  console.log(`${LOG_PREFIX} subscribeToPeriods - ini - groupCode: ${groupCode}`);
-  const periodsRef = collection(db, 'groups', groupCode, 'periods');
-  
-  return onSnapshot(periodsRef, (snapshot) => {
-    console.log(`${LOG_PREFIX} subscribeToPeriods - callback - docs: ${snapshot.size}`);
-    const periods: ExpensePeriod[] = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      periods.push({
-        ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-      } as ExpensePeriod);
-    });
-    
-    periods.sort((a, b) => {
-      if (a.year !== b.year) return b.year - a.year;
-      return parseInt(b.month.split('-')[1]) - parseInt(a.month.split('-')[1]);
-    });
-    
-    callback(periods);
-  });
-};
-
-export const subscribeToSettings = (
-  groupCode: string,
-  callback: (settings: ExpenseSettings) => void
-): (() => void) => {
-  console.log(`${LOG_PREFIX} subscribeToSettings - ini - groupCode: ${groupCode}`);
-  const groupRef = doc(db, 'groups', groupCode);
-  
-return onSnapshot(groupRef, (snapshot) => {
-      console.log(`${LOG_PREFIX} subscribeToSettings - callback - exists: ${snapshot.exists()}`);
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        callback(data.settings as ExpenseSettings);
-      }
-    });
 };
 
 export const migrateLocalDataToCloud = async (

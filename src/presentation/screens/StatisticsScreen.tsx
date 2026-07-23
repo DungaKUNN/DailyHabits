@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRe
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getSavedGroupCode, getPeriodsFromCloud } from '../../services/SyncService';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
+import { TrendUp, TrendDown, Wallet, Warning, Lightning, Drop, House, CaretRight, Check } from 'phosphor-react-native';
 
 type TimeRange = 'month' | 'all';
 type TabType = 'summary' | 'expenses' | 'finance';
@@ -50,6 +51,246 @@ type StatisticsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'M
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const LOG_PREFIX = '[StatisticsScreen]';
+
+
+const SimpleBarChart: React.FC<{
+  labels: string[];
+  years: number[];
+  incomeData: number[];
+  expenseData: number[];
+}> = ({ labels, years, incomeData, expenseData }) => {
+  const safeLabels = labels && labels.length > 0 ? labels : [''];
+  const safeYears = years && years.length > 0 ? years : [0];
+  const safeIncome = incomeData && incomeData.length > 0 ? incomeData : [0];
+  const safeExpense = expenseData && expenseData.length > 0 ? expenseData : [0];
+  
+  const [pageIndex, setPageIndex] = useState(0);
+  const itemsPerPage = 4;
+  const totalPages = Math.max(1, Math.ceil(safeLabels.length / itemsPerPage));
+  const startIdx = pageIndex * itemsPerPage;
+  const endIdx = Math.min(startIdx + itemsPerPage, safeLabels.length);
+  
+  const pageLabels = safeLabels.slice(startIdx, endIdx);
+  const pageIncome = safeIncome.slice(startIdx, endIdx);
+  const pageExpense = safeExpense.slice(startIdx, endIdx);
+  const pageYears = safeYears.slice(startIdx, endIdx);
+  
+  const maxValue = Math.max(...pageIncome, ...pageExpense, 1);
+  const chartHeight = 120;
+  
+  const totalIncome = safeIncome.reduce((a, b) => a + b, 0);
+  const totalExpense = safeExpense.reduce((a, b) => a + b, 0);
+  const netBalance = totalIncome - totalExpense;
+  
+  return (
+    <View style={customChartStyles.container}>
+      <View style={customChartStyles.barSummary}>
+        <View style={customChartStyles.barSummaryItem}>
+          <Text style={[customChartStyles.barSummaryLabel, { color: '#2196F3' }]}>Total Ingresos</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: '#2196F3' }]}>{formatCurrency(totalIncome)}</Text>
+        </View>
+        <View style={customChartStyles.barSummaryItem}>
+          <Text style={[customChartStyles.barSummaryLabel, { color: '#E53935' }]}>Total Gastos</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: '#E53935' }]}>{formatCurrency(totalExpense)}</Text>
+        </View>
+        <View style={customChartStyles.barSummaryItem}>
+          <Text style={[customChartStyles.barSummaryLabel, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>Balance</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>{formatCurrency(netBalance)}</Text>
+        </View>
+      </View>
+      {totalPages > 1 && (
+        <View style={customChartStyles.pageNav}>
+          <TouchableOpacity 
+            style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
+            onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
+            disabled={pageIndex === 0}
+          >
+            <Text style={customChartStyles.pageBtnText}>‹</Text>
+          </TouchableOpacity>
+          <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
+          <TouchableOpacity 
+            style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
+            onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
+            disabled={pageIndex >= totalPages - 1}
+          >
+            <Text style={customChartStyles.pageBtnText}>›</Text>
+          </TouchableOpacity>
+        </View>
+)}
+      <View style={customChartStyles.barHorizontalContainer}>
+        {pageLabels.map((label, index) => (
+          <View key={label + index} style={customChartStyles.barGroup}>
+            <View style={customChartStyles.barsContainer}>
+              <View style={[customChartStyles.barIncome, { height: Math.max((pageIncome[index] || 0) / maxValue * chartHeight, 4) }]} />
+              <View style={[customChartStyles.barExpense, { height: Math.max((pageExpense[index] || 0) / maxValue * chartHeight, 4) }]} />
+            </View>
+            <View style={customChartStyles.barValuesRow}>
+              <View style={customChartStyles.barValueItem}>
+                <View style={[customChartStyles.barDot, { backgroundColor: '#2196F3' }]} />
+                <Text style={customChartStyles.barValue}>{formatCurrency(pageIncome[index] || 0)}</Text>
+              </View>
+              <View style={customChartStyles.barValueItem}>
+                <View style={[customChartStyles.barDot, { backgroundColor: '#E53935' }]} />
+                <Text style={customChartStyles.barValue}>{formatCurrency(pageExpense[index] || 0)}</Text>
+              </View>
+            </View>
+            <Text style={customChartStyles.barLabel}>{pageLabels[index]}</Text>
+            <Text style={customChartStyles.barYear}>{pageYears[index]}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const SimplePieChart: React.FC<{
+  data: { name: string; amount: number; color: string }[];
+}> = ({ data }) => {
+  const total = data.reduce((sum, item) => sum + item.amount, 0);
+  if (total === 0) return null;
+  
+  return (
+    <View style={customChartStyles.pieContainer}>
+      {data.map((item, index) => (
+        <View key={item.name} style={customChartStyles.pieRow}>
+          <View style={[customChartStyles.pieDot, { backgroundColor: item.color }]} />
+          <Text style={customChartStyles.pieLabel}>{item.name}</Text>
+          <Text style={customChartStyles.pieValue}>{formatCurrency(item.amount)}</Text>
+          <Text style={customChartStyles.piePercent}>{Math.round((item.amount / total) * 100)}%</Text>
+        </View>
+      ))}
+    </View>
+  );
+};
+
+const SimpleLineChart: React.FC<{
+  labels: string[];
+  years: number[];
+  data: number[];
+}> = ({ labels, years, data }) => {
+  const [pageIndex, setPageIndex] = useState(0);
+  const itemsPerPage = 6;
+  const totalPages = Math.ceil(labels.length / itemsPerPage);
+  const startIdx = pageIndex * itemsPerPage;
+  const endIdx = Math.min(startIdx + itemsPerPage, labels.length);
+  
+  const pageLabels = labels.slice(startIdx, endIdx);
+  const pageData = data.slice(startIdx, endIdx);
+  const pageYears = years.slice(startIdx, endIdx);
+  
+  const isSingleMonth = data.length === 1;
+  const value = data[0] || 0;
+  const isPositive = value >= 0;
+  
+  if (isSingleMonth) {
+    return (
+      <View style={customChartStyles.lineContainer}>
+        <View style={customChartStyles.lineSummary}>
+          <Text style={[customChartStyles.lineSummaryText, { color: isPositive ? '#43A047' : '#E53935' }]}>
+            Balance: {formatCurrency(value)} ({isPositive ? 'positivo' : 'negativo'})
+          </Text>
+        </View>
+        <View style={customChartStyles.balanceBarContainer}>
+          <View style={customChartStyles.balanceBarGroup}>
+            <Text style={[customChartStyles.balanceBarValue, { color: isPositive ? '#43A047' : '#E53935' }]}>
+              {formatCurrency(value)}
+            </Text>
+            <View style={customChartStyles.balanceBarWrapper}>
+              <View 
+                style={[
+                  customChartStyles.balanceBar, 
+                  { 
+                    height: 100,
+                    backgroundColor: isPositive ? '#43A047' : '#E53935',
+                    borderTopLeftRadius: 4,
+                    borderTopRightRadius: 4,
+                    borderBottomLeftRadius: isPositive ? 0 : 4,
+                    borderBottomRightRadius: isPositive ? 0 : 4,
+                    marginTop: isPositive ? 0 : undefined,
+                    marginBottom: isPositive ? undefined : 0,
+                  }
+                ]} 
+              />
+            </View>
+            <Text style={customChartStyles.balanceBarLabel}>{labels[0]}</Text>
+            <Text style={customChartStyles.balanceBarYear}>{years[0]}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+  
+  const maxValue = Math.max(...pageData.filter(v => v > 0), 1);
+  const minValue = Math.min(...pageData.filter(v => v < 0), 0);
+  const chartHeight = 120;
+  
+  const totalPositive = data.filter(v => v > 0).reduce((a, b) => a + b, 0);
+  const totalNegative = Math.abs(data.filter(v => v < 0).reduce((a, b) => a + b, 0));
+  const netTrend = totalPositive - totalNegative;
+  
+  return (
+    <View style={customChartStyles.lineContainer}>
+      <View style={customChartStyles.lineSummary}>
+        <Text style={[customChartStyles.lineSummaryText, { color: netTrend >= 0 ? '#43A047' : '#E53935' }]}>
+          Balance Total: {formatCurrency(netTrend)} ({netTrend >= 0 ? 'positivo' : 'negativo'})
+        </Text>
+      </View>
+      {totalPages > 1 && (
+        <View style={customChartStyles.pageNav}>
+          <TouchableOpacity 
+            style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
+            onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
+            disabled={pageIndex === 0}
+          >
+            <Text style={customChartStyles.pageBtnText}>‹</Text>
+          </TouchableOpacity>
+          <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
+          <TouchableOpacity 
+            style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
+            onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
+            disabled={pageIndex >= totalPages - 1}
+          >
+            <Text style={customChartStyles.pageBtnText}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      <View style={customChartStyles.balanceBarContainer}>
+        {pageData.map((val, index) => {
+          const pos = val >= 0;
+          const barHeight = pos 
+            ? (val / maxValue) * chartHeight 
+            : (Math.abs(val) / Math.abs(minValue)) * chartHeight;
+          return (
+            <View key={index} style={customChartStyles.balanceBarGroup}>
+              <Text style={[customChartStyles.balanceBarValue, { color: pos ? '#43A047' : '#E53935' }]}>
+                {formatCurrency(val)}
+              </Text>
+              <View style={customChartStyles.balanceBarWrapper}>
+                <View 
+                  style={[
+                    customChartStyles.balanceBar, 
+                    { 
+                      height: Math.max(barHeight, 4),
+                      backgroundColor: pos ? '#43A047' : '#E53935',
+                      borderTopLeftRadius: pos ? 4 : 0,
+                      borderTopRightRadius: pos ? 4 : 0,
+                      borderBottomLeftRadius: pos ? 0 : 4,
+                      borderBottomRightRadius: pos ? 0 : 4,
+                      marginTop: pos ? 0 : undefined,
+                      marginBottom: pos ? undefined : 0,
+                    }
+                  ]} 
+                />
+              </View>
+              <Text style={customChartStyles.balanceBarLabel}>{pageLabels[index]}</Text>
+              <Text style={customChartStyles.balanceBarYear}>{pageYears[index]}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
 
 const StatisticsScreen: React.FC = () => {
   const navigation = useNavigation<StatisticsScreenNavigationProp>();
@@ -407,469 +648,6 @@ const StatisticsScreen: React.FC = () => {
     }
   };
 
-  const formatPercent = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)}%`;
-
-  const SimpleBarChart: React.FC<{
-    labels: string[];
-    years: number[];
-    incomeData: number[];
-    expenseData: number[];
-  }> = ({ labels, years, incomeData, expenseData }) => {
-    const safeLabels = labels && labels.length > 0 ? labels : [''];
-    const safeYears = years && years.length > 0 ? years : [0];
-    const safeIncome = incomeData && incomeData.length > 0 ? incomeData : [0];
-    const safeExpense = expenseData && expenseData.length > 0 ? expenseData : [0];
-    
-    const [pageIndex, setPageIndex] = useState(0);
-    const itemsPerPage = 4;
-    const totalPages = Math.max(1, Math.ceil(safeLabels.length / itemsPerPage));
-    const startIdx = pageIndex * itemsPerPage;
-    const endIdx = Math.min(startIdx + itemsPerPage, safeLabels.length);
-    
-    const pageLabels = safeLabels.slice(startIdx, endIdx);
-    const pageIncome = safeIncome.slice(startIdx, endIdx);
-    const pageExpense = safeExpense.slice(startIdx, endIdx);
-    const pageYears = safeYears.slice(startIdx, endIdx);
-    
-    const maxValue = Math.max(...pageIncome, ...pageExpense, 1);
-    const chartHeight = 120;
-    
-    const totalIncome = safeIncome.reduce((a, b) => a + b, 0);
-    const totalExpense = safeExpense.reduce((a, b) => a + b, 0);
-    const netBalance = totalIncome - totalExpense;
-    
-    return (
-      <View style={customChartStyles.container}>
-        <View style={customChartStyles.barSummary}>
-          <View style={customChartStyles.barSummaryItem}>
-            <Text style={[customChartStyles.barSummaryLabel, { color: '#2196F3' }]}>Total Ingresos</Text>
-            <Text style={[customChartStyles.barSummaryValue, { color: '#2196F3' }]}>{formatCurrency(totalIncome)}</Text>
-          </View>
-          <View style={customChartStyles.barSummaryItem}>
-            <Text style={[customChartStyles.barSummaryLabel, { color: '#E53935' }]}>Total Gastos</Text>
-            <Text style={[customChartStyles.barSummaryValue, { color: '#E53935' }]}>{formatCurrency(totalExpense)}</Text>
-          </View>
-          <View style={customChartStyles.barSummaryItem}>
-            <Text style={[customChartStyles.barSummaryLabel, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>Balance</Text>
-            <Text style={[customChartStyles.barSummaryValue, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>{formatCurrency(netBalance)}</Text>
-          </View>
-        </View>
-        {totalPages > 1 && (
-          <View style={customChartStyles.pageNav}>
-            <TouchableOpacity 
-              style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
-              onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
-              disabled={pageIndex === 0}
-            >
-              <Text style={customChartStyles.pageBtnText}>‹</Text>
-            </TouchableOpacity>
-            <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
-            <TouchableOpacity 
-              style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
-              onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
-              disabled={pageIndex >= totalPages - 1}
-            >
-              <Text style={customChartStyles.pageBtnText}>›</Text>
-            </TouchableOpacity>
-          </View>
-)}
-        <View style={customChartStyles.barHorizontalContainer}>
-          {pageLabels.map((label, index) => (
-            <View key={label + index} style={customChartStyles.barGroup}>
-              <View style={customChartStyles.barsContainer}>
-                <View style={[customChartStyles.barIncome, { height: Math.max((pageIncome[index] || 0) / maxValue * chartHeight, 4) }]} />
-                <View style={[customChartStyles.barExpense, { height: Math.max((pageExpense[index] || 0) / maxValue * chartHeight, 4) }]} />
-              </View>
-              <View style={customChartStyles.barValuesRow}>
-                <View style={customChartStyles.barValueItem}>
-                  <View style={[customChartStyles.barDot, { backgroundColor: '#2196F3' }]} />
-                  <Text style={customChartStyles.barValue}>{formatCurrency(pageIncome[index] || 0)}</Text>
-                </View>
-                <View style={customChartStyles.barValueItem}>
-                  <View style={[customChartStyles.barDot, { backgroundColor: '#E53935' }]} />
-                  <Text style={customChartStyles.barValue}>{formatCurrency(pageExpense[index] || 0)}</Text>
-                </View>
-              </View>
-              <Text style={customChartStyles.barLabel}>{pageLabels[index]}</Text>
-              <Text style={customChartStyles.barYear}>{pageYears[index]}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    );
-  };
-
-  const SimplePieChart: React.FC<{
-    data: { name: string; amount: number; color: string }[];
-  }> = ({ data }) => {
-    const total = data.reduce((sum, item) => sum + item.amount, 0);
-    if (total === 0) return null;
-    
-    return (
-      <View style={customChartStyles.pieContainer}>
-        {data.map((item, index) => (
-          <View key={item.name} style={customChartStyles.pieRow}>
-            <View style={[customChartStyles.pieDot, { backgroundColor: item.color }]} />
-            <Text style={customChartStyles.pieLabel}>{item.name}</Text>
-            <Text style={customChartStyles.pieValue}>{formatCurrency(item.amount)}</Text>
-            <Text style={customChartStyles.piePercent}>{Math.round((item.amount / total) * 100)}%</Text>
-          </View>
-        ))}
-      </View>
-    );
-  };
-
-  const SimpleLineChart: React.FC<{
-    labels: string[];
-    years: number[];
-    data: number[];
-  }> = ({ labels, years, data }) => {
-    const [pageIndex, setPageIndex] = useState(0);
-    const itemsPerPage = 6;
-    const totalPages = Math.ceil(labels.length / itemsPerPage);
-    const startIdx = pageIndex * itemsPerPage;
-    const endIdx = Math.min(startIdx + itemsPerPage, labels.length);
-    
-    const pageLabels = labels.slice(startIdx, endIdx);
-    const pageData = data.slice(startIdx, endIdx);
-    const pageYears = years.slice(startIdx, endIdx);
-    
-    const isSingleMonth = data.length === 1;
-    const value = data[0] || 0;
-    const isPositive = value >= 0;
-    
-    if (isSingleMonth) {
-      return (
-        <View style={customChartStyles.lineContainer}>
-          <View style={customChartStyles.lineSummary}>
-            <Text style={[customChartStyles.lineSummaryText, { color: isPositive ? '#43A047' : '#E53935' }]}>
-              Balance: {formatCurrency(value)} ({isPositive ? 'positivo' : 'negativo'})
-            </Text>
-          </View>
-          <View style={customChartStyles.balanceBarContainer}>
-            <View style={customChartStyles.balanceBarGroup}>
-              <Text style={[customChartStyles.balanceBarValue, { color: isPositive ? '#43A047' : '#E53935' }]}>
-                {formatCurrency(value)}
-              </Text>
-              <View style={customChartStyles.balanceBarWrapper}>
-                <View 
-                  style={[
-                    customChartStyles.balanceBar, 
-                    { 
-                      height: 100,
-                      backgroundColor: isPositive ? '#43A047' : '#E53935',
-                      borderTopLeftRadius: 4,
-                      borderTopRightRadius: 4,
-                      borderBottomLeftRadius: isPositive ? 0 : 4,
-                      borderBottomRightRadius: isPositive ? 0 : 4,
-                      marginTop: isPositive ? 0 : undefined,
-                      marginBottom: isPositive ? undefined : 0,
-                    }
-                  ]} 
-                />
-              </View>
-              <Text style={customChartStyles.balanceBarLabel}>{labels[0]}</Text>
-              <Text style={customChartStyles.balanceBarYear}>{years[0]}</Text>
-            </View>
-          </View>
-        </View>
-      );
-    }
-    
-    const maxValue = Math.max(...pageData.filter(v => v > 0), 1);
-    const minValue = Math.min(...pageData.filter(v => v < 0), 0);
-    const chartHeight = 120;
-    
-    const totalPositive = data.filter(v => v > 0).reduce((a, b) => a + b, 0);
-    const totalNegative = Math.abs(data.filter(v => v < 0).reduce((a, b) => a + b, 0));
-    const netTrend = totalPositive - totalNegative;
-    
-    return (
-      <View style={customChartStyles.lineContainer}>
-        <View style={customChartStyles.lineSummary}>
-          <Text style={[customChartStyles.lineSummaryText, { color: netTrend >= 0 ? '#43A047' : '#E53935' }]}>
-            Balance Total: {formatCurrency(netTrend)} ({netTrend >= 0 ? 'positivo' : 'negativo'})
-          </Text>
-        </View>
-        {totalPages > 1 && (
-          <View style={customChartStyles.pageNav}>
-            <TouchableOpacity 
-              style={[customChartStyles.pageBtn, pageIndex === 0 && customChartStyles.pageBtnDisabled]}
-              onPress={() => setPageIndex(Math.max(0, pageIndex - 1))}
-              disabled={pageIndex === 0}
-            >
-              <Text style={customChartStyles.pageBtnText}>‹</Text>
-            </TouchableOpacity>
-            <Text style={customChartStyles.pageIndicator}>{pageIndex + 1}/{totalPages}</Text>
-            <TouchableOpacity 
-              style={[customChartStyles.pageBtn, pageIndex >= totalPages - 1 && customChartStyles.pageBtnDisabled]}
-              onPress={() => setPageIndex(Math.min(totalPages - 1, pageIndex + 1))}
-              disabled={pageIndex >= totalPages - 1}
-            >
-              <Text style={customChartStyles.pageBtnText}>›</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        <View style={customChartStyles.balanceBarContainer}>
-          {pageData.map((val, index) => {
-            const pos = val >= 0;
-            const barHeight = pos 
-              ? (val / maxValue) * chartHeight 
-              : (Math.abs(val) / Math.abs(minValue)) * chartHeight;
-            return (
-              <View key={index} style={customChartStyles.balanceBarGroup}>
-                <Text style={[customChartStyles.balanceBarValue, { color: pos ? '#43A047' : '#E53935' }]}>
-                  {formatCurrency(val)}
-                </Text>
-                <View style={customChartStyles.balanceBarWrapper}>
-                  <View 
-                    style={[
-                      customChartStyles.balanceBar, 
-                      { 
-                        height: Math.max(barHeight, 4),
-                        backgroundColor: pos ? '#43A047' : '#E53935',
-                        borderTopLeftRadius: pos ? 4 : 0,
-                        borderTopRightRadius: pos ? 4 : 0,
-                        borderBottomLeftRadius: pos ? 0 : 4,
-                        borderBottomRightRadius: pos ? 0 : 4,
-                        marginTop: pos ? 0 : undefined,
-                        marginBottom: pos ? undefined : 0,
-                      }
-                    ]} 
-                  />
-                </View>
-                <Text style={customChartStyles.balanceBarLabel}>{pageLabels[index]}</Text>
-                <Text style={customChartStyles.balanceBarYear}>{pageYears[index]}</Text>
-              </View>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
-  const customChartStyles = StyleSheet.create({
-    container: {
-      paddingVertical: 10,
-      minHeight: 200,
-    },
-    barSummary: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      marginBottom: 16,
-      paddingBottom: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: '#eee',
-    },
-    barSummaryItem: {
-      alignItems: 'center',
-    },
-    barSummaryLabel: {
-      fontSize: 11,
-      color: '#666',
-      marginBottom: 4,
-    },
-    barSummaryValue: {
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    barGroup: {
-      alignItems: 'center',
-      flex: 1,
-      paddingHorizontal: 2,
-    },
-    barValuesRow: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 8,
-      marginTop: 6,
-    },
-    barValueItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 2,
-    },
-    barDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-    },
-    barValue: {
-      fontSize: 8,
-      color: '#666',
-    },
-    barsContainer: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      height: 120,
-      gap: 4,
-    },
-    barIncome: {
-      width: 22,
-      backgroundColor: '#2196F3',
-      borderRadius: 4,
-    },
-    barExpense: {
-      width: 22,
-      backgroundColor: '#E53935',
-      borderRadius: 4,
-    },
-    barLabel: {
-      fontSize: 11,
-      color: '#666',
-      marginTop: 8,
-    },
-    barYear: {
-      fontSize: 9,
-      color: '#999',
-    },
-    barHorizontalContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      alignItems: 'flex-end',
-      paddingVertical: 10,
-    },
-    pageNav: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 16,
-      marginTop: 8,
-      gap: 12,
-    },
-    pageBtn: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: '#e0e0e0',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    pageBtnDisabled: {
-      opacity: 0.4,
-    },
-    pageBtnText: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: '#333',
-    },
-    pageIndicator: {
-      fontSize: 12,
-      color: '#666',
-    },
-    pieContainer: {
-      gap: 8,
-    },
-    pieRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 6,
-    },
-    pieDot: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-      marginRight: 10,
-    },
-    pieLabel: {
-      flex: 1,
-      fontSize: 13,
-      color: '#333',
-    },
-    pieValue: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: '#333',
-      marginRight: 8,
-    },
-    piePercent: {
-      fontSize: 12,
-      color: '#666',
-      width: 40,
-      textAlign: 'right',
-    },
-    lineContainer: {
-      paddingVertical: 10,
-    },
-    lineSummary: {
-      alignItems: 'center',
-      marginBottom: 12,
-      paddingBottom: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: '#eee',
-    },
-    lineSummaryText: {
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    lineChartArea: {
-      height: 100,
-      position: 'relative',
-      backgroundColor: '#f8f9fa',
-      borderRadius: 8,
-    },
-    lineDot: {
-      position: 'absolute',
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-      backgroundColor: '#00D09E',
-      borderWidth: 2,
-      borderColor: '#fff',
-    },
-    lineValuesRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: 8,
-      paddingHorizontal: 4,
-    },
-    lineValue: {
-      fontSize: 10,
-      fontWeight: '500',
-    },
-    lineLabels: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: 6,
-    },
-    lineLabel: {
-      fontSize: 10,
-      color: '#666',
-    },
-    balanceBarContainer: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      alignItems: 'flex-end',
-      height: 160,
-      paddingVertical: 10,
-    },
-    balanceBarGroup: {
-      alignItems: 'center',
-      flex: 1,
-    },
-    balanceBarValue: {
-      fontSize: 9,
-      fontWeight: '600',
-      marginBottom: 4,
-    },
-    balanceBarWrapper: {
-      height: 120,
-      justifyContent: 'flex-end',
-    },
-    balanceBar: {
-      width: 28,
-    },
-    balanceBarLabel: {
-      fontSize: 10,
-      color: '#666',
-      marginTop: 4,
-    },
-    balanceBarYear: {
-      fontSize: 9,
-      color: '#999',
-    },
-  });
-
   const renderCircularProgress = (percentage: number, size: number = 80) => {
     const strokeWidth = 8;
     const radius = (size - strokeWidth) / 2;
@@ -930,7 +708,7 @@ const StatisticsScreen: React.FC = () => {
               ? '¡Excelente! Estás ahorrando bien 🎉' 
               : summaryStats.savingsRate >= 10 
                 ? '¡Bien! Sigue así 💪' 
-                : 'Intenta ahorrar al menos 20% 💡'}
+                : 'Intenta ahorrar al menos 20%'}
           </Text>
         </LinearGradient>
       </View>
@@ -938,7 +716,7 @@ const StatisticsScreen: React.FC = () => {
       <View style={styles.kpiGrid}>
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIcon, { backgroundColor: '#E8F5E9' }]}>
-            <Text style={styles.kpiEmoji}>💰</Text>
+            <TrendUp size={20} color="#43A047" weight="fill" />
           </View>
           <Text style={styles.kpiLabel}>Ingresos</Text>
           <Text style={[styles.kpiValue, { color: '#43A047' }]}>{formatCurrency(summaryStats.totalIncome)}</Text>
@@ -947,7 +725,7 @@ const StatisticsScreen: React.FC = () => {
 
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIcon, { backgroundColor: '#FFEBEE' }]}>
-            <Text style={styles.kpiEmoji}>📤</Text>
+            <TrendDown size={20} color="#E53935" weight="fill" />
           </View>
           <Text style={styles.kpiLabel}>Gastos</Text>
           <Text style={[styles.kpiValue, { color: '#E53935' }]}>{formatCurrency(summaryStats.totalExpenses)}</Text>
@@ -956,7 +734,7 @@ const StatisticsScreen: React.FC = () => {
 
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIcon, { backgroundColor: '#E3F2FD' }]}>
-            <Text style={styles.kpiEmoji}>🏦</Text>
+            <Wallet size={20} color="#1565C0" weight="fill" />
           </View>
           <Text style={styles.kpiLabel}>Ahorros</Text>
           <Text style={[styles.kpiValue, { color: '#1565C0' }]}>{formatCurrency(summaryStats.totalSavings)}</Text>
@@ -964,7 +742,7 @@ const StatisticsScreen: React.FC = () => {
 
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIcon, { backgroundColor: '#FFF3E0' }]}>
-            <Text style={styles.kpiEmoji}>💳</Text>
+            <Warning size={20} color="#FF9800" weight="fill" />
           </View>
           <Text style={styles.kpiLabel}>Deudas</Text>
           <Text style={[styles.kpiValue, { color: '#FF9800' }]}>{formatCurrency(summaryStats.totalDebts)}</Text>
@@ -1008,7 +786,7 @@ const StatisticsScreen: React.FC = () => {
           </View>
           <View style={styles.chartCard}>
             <View style={styles.chartHeaderRow}>
-              <Text style={styles.chartTitle}>📊 Ingresos vs Gastos</Text>
+              <Text style={styles.chartTitle}>Ingresos vs Gastos</Text>
               {chartViewMode === 'single' && chartData.monthlyLabels.length > 1 && (
                 <View style={styles.chartNav}>
                   <TouchableOpacity 
@@ -1083,7 +861,7 @@ const StatisticsScreen: React.FC = () => {
 
           {chartData.categoryData.length > 0 && (
             <View style={styles.chartCard}>
-              <Text style={styles.chartTitle}>🥧 Gastos por Categoría</Text>
+              <Text style={styles.chartTitle}>Gastos por Categoría</Text>
               <SimplePieChart data={chartData.categoryData} />
             </View>
           )}
@@ -1091,7 +869,7 @@ const StatisticsScreen: React.FC = () => {
           {chartData.trendData.length > 1 && (
             <View style={styles.chartCard}>
               <View style={styles.chartHeaderRow}>
-                <Text style={styles.chartTitle}>📈 Tendencia de Balance</Text>
+                <Text style={styles.chartTitle}>Tendencia de Balance</Text>
                 {chartViewMode === 'single' && chartData.monthlyLabels.length > 1 && (
                   <View style={styles.chartNav}>
                     <TouchableOpacity 
@@ -1145,7 +923,7 @@ const StatisticsScreen: React.FC = () => {
       <View style={styles.expenseCard}>
         <View style={styles.expenseHeader}>
           <View style={[styles.expenseIcon, { backgroundColor: '#FFF3E0' }]}>
-            <Text style={styles.expenseEmoji}>⚡</Text>
+            <Lightning size={20} color="#FF9800" weight="fill" />
           </View>
           <View style={styles.expenseInfo}>
             <Text style={styles.expenseLabel}>Luz</Text>
@@ -1157,15 +935,15 @@ const StatisticsScreen: React.FC = () => {
           {expenseStats.luzChange > 10 
             ? '⚠️ Consumo alto. Apaga luces innecesarias' 
             : expenseStats.luzChange < 0 
-              ? '✅ ¡Bien! Bajaste el consumo' 
-              : '💡 Uso normal este mes'}
+              ? '✓ ¡Bien! Bajaste el consumo' 
+              : 'Uso normal este mes'}
         </Text>
       </View>
 
       <View style={styles.expenseCard}>
         <View style={styles.expenseHeader}>
           <View style={[styles.expenseIcon, { backgroundColor: '#E3F2FD' }]}>
-            <Text style={styles.expenseEmoji}>💧</Text>
+            <Drop size={20} color="#1565C0" weight="fill" />
           </View>
           <View style={styles.expenseInfo}>
             <Text style={styles.expenseLabel}>Agua</Text>
@@ -1177,8 +955,8 @@ const StatisticsScreen: React.FC = () => {
           {expenseStats.aguaChange > 10 
             ? '⚠️ Revisa llaves que goteen' 
             : expenseStats.aguaChange < 0 
-              ? '✅ ¡Bien! Ahorraste agua' 
-              : '💡 Uso normal este mes'}
+              ? '✓ ¡Bien! Ahorraste agua' 
+              : 'Uso normal este mes'}
         </Text>
       </View>
 
@@ -1199,7 +977,7 @@ const StatisticsScreen: React.FC = () => {
     if (!current && !isAllRange) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyEmoji}>💰</Text>
+          <Wallet size={48} color={colors.textMuted} weight="light" />
           <Text style={styles.emptyTitle}>Sin datos financieros</Text>
           <Text style={styles.emptyText}>Registra tus finanzas para ver estadísticas</Text>
         </View>
@@ -1296,7 +1074,7 @@ const StatisticsScreen: React.FC = () => {
 
         {totalDebtRemaining > 0 && (
           <View style={styles.debtSummaryCard}>
-            <Text style={styles.debtSummaryTitle}>📊 Resumen de Deudas</Text>
+            <Text style={styles.debtSummaryTitle}>Resumen de Deudas</Text>
             <View style={styles.debtSummaryGrid}>
               <View style={styles.debtSummaryItem}>
                 <Text style={styles.debtSummaryLabel}>Total Deuda</Text>
@@ -1328,7 +1106,7 @@ const StatisticsScreen: React.FC = () => {
 
         {activeDebts.length > 0 && (
           <View style={styles.debtsCard}>
-            <Text style={styles.debtsTitle}>🏦 Estado de Deudas ({activeDebts.length})</Text>
+            <Text style={styles.debtsTitle}>Estado de Deudas ({activeDebts.length})</Text>
             {activeDebts.map((debt, index) => (
               <View key={debt.id || index} style={styles.debtRow}>
                 <View style={styles.debtInfo}>
@@ -1360,10 +1138,10 @@ const StatisticsScreen: React.FC = () => {
         )}
 
         {activeDebts.length === 0 && (isAllRange || (current && current.debts.length === 0)) && (
-          <View style={styles.emptyDebts}>
-            <Text style={styles.emptyDebtsEmoji}>✅</Text>
-            <Text style={styles.emptyDebtsText}>No tienes deudas registradas</Text>
-          </View>
+            <View style={styles.emptyDebts}>
+              <Check size={32} color={colors.accent.green} weight="bold" />
+              <Text style={styles.emptyDebtsText}>No tienes deudas registradas</Text>
+            </View>
         )}
       </View>
     );
@@ -1374,23 +1152,23 @@ const StatisticsScreen: React.FC = () => {
       <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
       <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
         <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
-          <Text style={styles.headerTitle}>📊 Estadísticas</Text>
+           <Text style={styles.headerTitle}>Estadísticas</Text>
           <Text style={styles.headerSubtitle}>Resumen de tus finanzas</Text>
         </SafeAreaView>
       </LinearGradient>
 
       <View style={styles.tabContainer}>
         {[
-          { key: 'summary', label: 'Resumen', icon: '🏠' },
-          { key: 'expenses', label: 'Luz/Agua', icon: '💡' },
-          { key: 'finance', label: 'Finanzas', icon: '💰' },
+          { key: 'summary', label: 'Resumen', Icon: House },
+          { key: 'expenses', label: 'Luz/Agua', Icon: Lightning },
+          { key: 'finance', label: 'Finanzas', Icon: Wallet },
         ].map(tab => (
           <TouchableOpacity
             key={tab.key}
             style={[styles.tab, activeTab === tab.key && styles.tabActive]}
             onPress={() => setActiveTab(tab.key as TabType)}
           >
-            <Text style={styles.tabIcon}>{tab.icon}</Text>
+            <tab.Icon size={18} color={activeTab === tab.key ? '#FFFFFF' : colors.textMuted} weight="fill" />
             <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
               {tab.label}
             </Text>
@@ -1472,6 +1250,228 @@ const StatisticsScreen: React.FC = () => {
   );
 };
 
+const customChartStyles = StyleSheet.create({
+  container: {
+    paddingVertical: 10,
+    minHeight: 200,
+  },
+  barSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  barSummaryItem: {
+    alignItems: 'center',
+  },
+  barSummaryLabel: {
+    fontSize: 11,
+    color: '#666',
+    marginBottom: 4,
+  },
+  barSummaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  barGroup: {
+    alignItems: 'center',
+    flex: 1,
+    paddingHorizontal: 2,
+  },
+  barValuesRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  barValueItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  barDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  barValue: {
+    fontSize: 8,
+    color: '#666',
+  },
+  barsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 120,
+    gap: 4,
+  },
+  barIncome: {
+    width: 22,
+    backgroundColor: '#2196F3',
+    borderRadius: 4,
+  },
+  barExpense: {
+    width: 22,
+    backgroundColor: '#E53935',
+    borderRadius: 4,
+  },
+  barLabel: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 8,
+  },
+  barYear: {
+    fontSize: 9,
+    color: '#999',
+  },
+  barHorizontalContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    paddingVertical: 10,
+  },
+  pageNav: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 8,
+    gap: 12,
+  },
+  pageBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+  },
+  pageBtnText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  pageIndicator: {
+    fontSize: 12,
+    color: '#666',
+  },
+  pieContainer: {
+    gap: 8,
+  },
+  pieRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  pieDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 10,
+  },
+  pieLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
+  },
+  pieValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+    marginRight: 8,
+  },
+  piePercent: {
+    fontSize: 12,
+    color: '#666',
+    width: 40,
+    textAlign: 'right',
+  },
+  lineContainer: {
+    paddingVertical: 10,
+  },
+  lineSummary: {
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  lineSummaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  lineChartArea: {
+    height: 100,
+    position: 'relative',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+  },
+  lineDot: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#00D09E',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  lineValuesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  lineValue: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  lineLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  lineLabel: {
+    fontSize: 10,
+    color: '#666',
+  },
+  balanceBarContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: 160,
+    paddingVertical: 10,
+  },
+  balanceBarGroup: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  balanceBarValue: {
+    fontSize: 9,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  balanceBarWrapper: {
+    height: 120,
+    justifyContent: 'flex-end',
+  },
+  balanceBar: {
+    width: 28,
+  },
+  balanceBarLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 4,
+  },
+  balanceBarYear: {
+    fontSize: 9,
+    color: '#999',
+  },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1516,10 +1516,6 @@ const styles = StyleSheet.create({
   },
   tabActive: {
     backgroundColor: colors.primary.main,
-  },
-  tabIcon: {
-    fontSize: 18,
-    marginBottom: 2,
   },
   tabText: {
     fontSize: 11,
@@ -1657,9 +1653,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  kpiEmoji: {
-    fontSize: 22,
-  },
   kpiLabel: {
     fontSize: 12,
     color: '#666',
@@ -1729,9 +1722,6 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  expenseEmoji: {
-    fontSize: 22,
   },
   expenseInfo: {
     flex: 1,
@@ -1916,10 +1906,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
   emptyTitle: {
     fontSize: 16,
     fontWeight: 'bold',
@@ -1937,10 +1923,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     marginTop: 16,
-  },
-  emptyDebtsEmoji: {
-    fontSize: 36,
-    marginBottom: 8,
   },
   emptyDebtsText: {
     fontSize: 14,

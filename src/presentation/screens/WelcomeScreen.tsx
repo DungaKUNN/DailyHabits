@@ -3,6 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
+  Platform,
   TextInput,
   TouchableOpacity,
   Alert,
@@ -11,24 +12,37 @@ import {
   Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ClipboardAPI from 'expo-clipboard';
-import { 
-  getSavedGroupCode, 
-  getSavedGroupName, 
-  createGroup, 
+import {
+  House,
+  HouseLine,
+  Link,
+  CheckCircle,
+  ArrowLeft,
+  Share as ShareIcon,
+  Lightning,
+  ChartBar,
+  Users,
+  ArrowRight,
+} from 'phosphor-react-native';
+import {
+  getSavedGroupCode,
+  getSavedGroupName,
+  createGroup,
   joinGroup,
-  migrateLocalDataToCloud 
+  migrateLocalDataToCloud,
 } from '../../services/SyncService';
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { getDatabase } from '../../data/Database';
-import { colors } from '../theme/colors';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 
 interface WelcomeScreenProps {
   onGroupReady: () => void;
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
-  const LOG_PREFIX = '[WelcomeScreen]';
   const [mode, setMode] = useState<'initial' | 'create' | 'join'>('initial');
   const [groupName, setGroupName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -37,20 +51,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect - ini`);
     checkExistingGroup();
-    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const checkExistingGroup = async () => {
-    console.log(`${LOG_PREFIX} checkExistingGroup - ini`);
     const code = await getSavedGroupCode();
-    console.log(`${LOG_PREFIX} checkExistingGroup - code: ${code}`);
     if (code) {
-      console.log(`${LOG_PREFIX} checkExistingGroup - hay código, llamando onGroupReady`);
       onGroupReady();
-    } else {
-      console.log(`${LOG_PREFIX} checkExistingGroup - no hay código, mostrando pantalla de inicio`);
     }
   };
 
@@ -67,13 +74,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
         repo.getAllPeriods(),
         repo.getSettings(),
       ]);
-      
+
       const code = await createGroup(groupName.trim(), localSettings);
-      
+
       if (localPeriods.length > 0) {
         await migrateLocalDataToCloud(code, localPeriods, localSettings);
       }
-      
+
       setCreatedCode(code);
       setShowSuccess(true);
     } catch (error) {
@@ -84,28 +91,22 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   };
 
   const handleJoinGroup = async () => {
-    console.log('[WelcomeScreen] handleJoinGroup - joinCode:', joinCode);
     if (!joinCode.trim()) {
       Alert.alert('Error', 'Ingresa el código del grupo');
-      console.log('[WelcomeScreen] handleJoinGroup - Código vacío');
       return;
     }
 
     setLoading(true);
-    console.log('[WelcomeScreen] handleJoinGroup - Llamando joinGroup con:', joinCode.trim());
     try {
       const result = await joinGroup(joinCode.trim());
-      console.log('[WelcomeScreen] handleJoinGroup - Resultado:', result);
       if (result.success) {
         setCreatedCode(joinCode.trim().toUpperCase());
         setShowSuccess(true);
-        console.log('[WelcomeScreen] handleJoinGroup - Éxito, showSuccess:', true);
       } else {
         Alert.alert('Error', result.error || 'Código inválido');
-        console.log('[WelcomeScreen] handleJoinGroup - Error:', result.error);
       }
     } catch (error) {
-      console.error('[WelcomeScreen] Error joining group:', error);
+      console.error('Error joining group:', error);
       Alert.alert('Error', 'No se pudo unir al grupo');
     }
     setLoading(false);
@@ -123,30 +124,31 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
   };
 
   const handleContinue = () => {
-    console.log('[WelcomeScreen] handleContinue - Llamando onGroupReady');
     onGroupReady();
   };
 
   if (showSuccess) {
-    console.log('[WelcomeScreen] Render - showSuccess:', showSuccess, 'createdCode:', createdCode);
     return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.success} />
         <LinearGradient
-          colors={['#4CAF50', '#388E3C']}
+          colors={[colors.success, '#059669']}
           style={styles.successContainer}
         >
-          <Text style={styles.successIcon}>✅</Text>
+          <View style={styles.successIconContainer}>
+            <CheckCircle size={64} color={colors.common.white} weight="fill" />
+          </View>
           <Text style={styles.successTitle}>¡Listo!</Text>
           <Text style={styles.successSubtitle}>Tu grupo está configurado</Text>
-          
-          <View style={styles.codeContainer}>
-            <Text style={styles.codeLabel}>Código del grupo: {createdCode || 'SIN CÓDIGO'}</Text>
-            <Text style={styles.codeValue}>{createdCode || '----'}</Text>
+
+          <View style={styles.codeCard}>
+            <Text style={styles.codeLabel}>Código del grupo</Text>
+            <Text style={styles.codeValue} numberOfLines={1} adjustsFontSizeToFit>{createdCode || '----'}</Text>
           </View>
 
           <TouchableOpacity style={styles.shareButton} onPress={handleShareCode}>
-            <Text style={styles.shareButtonText}>📤 Compartir código</Text>
+            <ShareIcon size={20} color={colors.common.white} weight="bold" />
+            <Text style={styles.shareButtonText}>Compartir código</Text>
           </TouchableOpacity>
 
           <Text style={styles.shareHint}>
@@ -154,28 +156,30 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
           </Text>
 
           <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-            <Text style={styles.continueButtonText}>Continuar →</Text>
+            <Text style={styles.continueButtonText}>Continuar</Text>
+            <ArrowRight size={20} color={colors.common.white} weight="bold" />
           </TouchableOpacity>
         </LinearGradient>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (mode === 'create') {
     return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
         <LinearGradient
-          colors={['#4CAF50', '#388E3C']}
+          colors={[colors.primary.main, colors.primary.dark]}
           style={styles.formContainer}
         >
           <View style={styles.formHeader}>
             <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
-              <Text style={styles.backButtonText}>← Volver</Text>
+              <ArrowLeft size={24} color={colors.common.white} weight="bold" />
+              <Text style={styles.backButtonText}>Volver</Text>
             </TouchableOpacity>
-            
+
             <View style={styles.formIconContainer}>
-              <Text style={styles.formIcon}>🏠</Text>
+              <House size={40} color={colors.common.white} weight="fill" />
             </View>
             <Text style={styles.formTitle}>Crear grupo familiar</Text>
             <Text style={styles.formSubtitle}>
@@ -191,42 +195,46 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
                 value={groupName}
                 onChangeText={setGroupName}
                 placeholder="Ej: Familia López"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.input.placeholder}
               />
             </View>
 
-            <TouchableOpacity 
-              style={styles.submitButton} 
+            <TouchableOpacity
+              style={styles.submitButton}
               onPress={handleCreateGroup}
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.common.white} />
               ) : (
-                <Text style={styles.submitButtonText}>✅ Crear grupo</Text>
+                <>
+                  <CheckCircle size={20} color={colors.common.white} weight="bold" />
+                  <Text style={styles.submitButtonText}>Crear grupo</Text>
+                </>
               )}
             </TouchableOpacity>
           </View>
         </LinearGradient>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (mode === 'join') {
     return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#9C27B0" />
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
         <LinearGradient
-          colors={['#9C27B0', '#7B1FA2']}
+          colors={[colors.primary.dark, colors.primary.main]}
           style={styles.formContainer}
         >
           <View style={styles.formHeader}>
             <TouchableOpacity style={styles.backButton} onPress={() => setMode('initial')}>
-              <Text style={styles.backButtonText}>← Volver</Text>
+              <ArrowLeft size={24} color={colors.common.white} weight="bold" />
+              <Text style={styles.backButtonText}>Volver</Text>
             </TouchableOpacity>
-            
+
             <View style={styles.formIconContainer}>
-              <Text style={styles.formIcon}>🔗</Text>
+              <Link size={40} color={colors.common.white} weight="bold" />
             </View>
             <Text style={styles.formTitle}>Unirse a un grupo</Text>
             <Text style={styles.formSubtitle}>
@@ -238,283 +246,338 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Código del grupo</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, styles.codeInput]}
                 value={joinCode}
-                onChangeText={(text) => {
-                  console.log('[WelcomeScreen] Input código - texto:', text);
-                  setJoinCode(text);
-                }}
+                onChangeText={setJoinCode}
                 placeholder="Ej: ABCD1234"
-                placeholderTextColor="#999"
+                placeholderTextColor={colors.input.placeholder}
                 autoCapitalize="characters"
                 maxLength={8}
               />
             </View>
 
-            <TouchableOpacity 
-              style={[styles.submitButton, styles.submitButtonPurple]} 
+            <TouchableOpacity
+              style={styles.submitButton}
               onPress={handleJoinGroup}
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.common.white} />
               ) : (
-                <Text style={styles.submitButtonText}>✅ Unirse al grupo</Text>
+                <>
+                  <Link size={20} color={colors.common.white} weight="bold" />
+                  <Text style={styles.submitButtonText}>Unirse al grupo</Text>
+                </>
               )}
             </TouchableOpacity>
           </View>
         </LinearGradient>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.main} />
       <LinearGradient
-        colors={['#1565C0', '#2196F3']}
+        colors={[colors.primary.main, colors.primary.dark]}
         style={styles.initialContainer}
       >
-        <Text style={styles.logo}>🏠</Text>
-        <Text style={styles.appName}>CasaBalance</Text>
+        <View style={styles.logoContainer}>
+          <House size={48} color={colors.common.white} weight="fill" />
+        </View>
+        <Text style={styles.appName} numberOfLines={1}>CasaBalance</Text>
         <Text style={styles.tagline}>Gastos del Hogar</Text>
 
         <View style={styles.featuresContainer}>
-          <Text style={styles.featureItem}>💡 Pago de recibos</Text>
-          <Text style={styles.featureItem}>📊 Estadísticas</Text>
-          <Text style={styles.featureItem}>👨‍👩‍👧‍👦 Comparte con tu familia</Text>
+          <View style={styles.featureRow}>
+            <View style={styles.featureIconContainer}>
+              <Lightning size={20} color={colors.primary.main} weight="fill" />
+            </View>
+            <Text style={styles.featureItem}>Pago de recibos</Text>
+          </View>
+          <View style={styles.featureRow}>
+            <View style={styles.featureIconContainer}>
+              <ChartBar size={20} color={colors.primary.main} weight="fill" />
+            </View>
+            <Text style={styles.featureItem}>Estadísticas</Text>
+          </View>
+          <View style={styles.featureRow}>
+            <View style={styles.featureIconContainer}>
+              <Users size={20} color={colors.primary.main} weight="fill" />
+            </View>
+            <Text style={styles.featureItem}>Comparte con tu familia</Text>
+          </View>
         </View>
 
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity 
-            style={styles.primaryButton} 
+          <TouchableOpacity
+            style={styles.primaryButton}
             onPress={() => setMode('create')}
           >
-            <Text style={styles.primaryButtonText}>🏠 Crear grupo nuevo</Text>
+            <HouseLine size={20} color={colors.common.white} weight="bold" />
+            <Text style={styles.primaryButtonText}>Crear grupo nuevo</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={styles.secondaryButton} 
+          <TouchableOpacity
+            style={styles.secondaryButton}
             onPress={() => setMode('join')}
           >
-            <Text style={styles.secondaryButtonText}>🔗 Unirse con código</Text>
+            <Link size={20} color={colors.primary.main} weight="bold" />
+            <Text style={styles.secondaryButtonText}>Unirse con código</Text>
           </TouchableOpacity>
         </View>
       </LinearGradient>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.primary.main,
   },
   initialContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 30,
+    padding: spacing[8],
   },
-  logo: {
-    fontSize: 80,
-    marginBottom: 10,
+  logoContainer: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[5],
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   appName: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-    marginBottom: 5,
+    ...typography.h1,
+    color: colors.common.white,
+    marginBottom: spacing[1],
   },
   tagline: {
-    fontSize: 18,
-    color: colors.text,
-    marginBottom: 40,
+    ...typography.bodyMedium,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: spacing[12],
   },
   featuresContainer: {
-    marginBottom: 50,
+    width: '100%',
+    marginBottom: spacing[12],
+    gap: spacing[3],
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: borderRadius.lg,
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  featureIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.common.white,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featureItem: {
-    fontSize: 16,
-    color: colors.text,
-    marginVertical: 8,
-    textAlign: 'center',
+    ...typography.bodyMedium,
+    color: colors.common.white,
   },
   buttonsContainer: {
     width: '100%',
-    gap: 15,
+    gap: spacing[3],
   },
   primaryButton: {
-    backgroundColor: colors.primary.main,
-    borderRadius: 12,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
+    justifyContent: 'center',
+    backgroundColor: colors.common.white,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing[4],
+    gap: spacing[2],
+    ...shadows.md,
   },
   primaryButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.common.white,
+    ...typography.button,
+    color: colors.primary.dark,
   },
   secondaryButton: {
-    backgroundColor: 'transparent',
-    borderRadius: 12,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
-    borderWidth: 2,
-    borderColor: colors.primary.main,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing[4],
+    gap: spacing[2],
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   secondaryButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.primary.main,
+    ...typography.button,
+    color: colors.common.white,
   },
   formContainer: {
     flex: 1,
-    padding: 30,
-    paddingTop: 50,
+    padding: spacing[8],
+    paddingTop: spacing[4],
   },
   formHeader: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: spacing[8],
   },
   formBody: {
     flex: 1,
     justifyContent: 'center',
   },
   backButton: {
-    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing[2],
+    marginBottom: spacing[8],
   },
   backButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
+    ...typography.bodyMedium,
+    color: colors.common.white,
   },
   formIconContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
-    marginBottom: 15,
-  },
-  formIcon: {
-    fontSize: 50,
-    textAlign: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[4],
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   formTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 8,
+    ...typography.h2,
+    color: colors.common.white,
+    marginBottom: spacing[2],
   },
   formSubtitle: {
-    fontSize: 15,
+    ...typography.body,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
-    lineHeight: 22,
   },
   inputContainer: {
-    marginBottom: 30,
+    marginBottom: spacing[6],
   },
   inputLabel: {
-    fontSize: 14,
-    color: colors.text,
-    marginBottom: 8,
-    fontWeight: '600',
+    ...typography.label,
+    color: colors.common.white,
+    marginBottom: spacing[2],
   },
   input: {
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 16,
-    fontSize: 18,
-    color: colors.text,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    padding: spacing[4],
+    ...typography.body,
+    color: colors.common.white,
+  },
+  codeInput: {
+    ...typography.h3,
+    letterSpacing: 2,
+    textAlign: 'center',
   },
   submitButton: {
-    backgroundColor: colors.primary.main,
-    borderRadius: 12,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
-  },
-  submitButtonPurple: {
-    backgroundColor: colors.primary.dark,
+    justifyContent: 'center',
+    backgroundColor: colors.common.white,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing[4],
+    gap: spacing[2],
   },
   submitButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.common.white,
+    ...typography.button,
+    color: colors.primary.dark,
   },
   successContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 30,
+    padding: spacing[8],
   },
-  successIcon: {
-    fontSize: 80,
-    marginBottom: 20,
+  successIconContainer: {
+    marginBottom: spacing[5],
   },
   successTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-    marginBottom: 10,
+    ...typography.h1,
+    color: colors.common.white,
+    marginBottom: spacing[2],
   },
   successSubtitle: {
-    fontSize: 18,
-    color: colors.text,
-    marginBottom: 30,
+    ...typography.bodyMedium,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginBottom: spacing[8],
   },
-  codeContainer: {
-    backgroundColor: colors.header.background,
-    borderRadius: 12,
-    padding: 20,
+  codeCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: borderRadius.xl,
+    padding: spacing[6],
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: spacing[6],
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   codeLabel: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: 8,
+    ...typography.captionMedium,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: spacing[2],
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   codeValue: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-    letterSpacing: 4,
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.common.white,
+    letterSpacing: 3,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
   },
   shareButton: {
-    backgroundColor: colors.primary.main,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 30,
-    marginBottom: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[6],
+    marginBottom: spacing[3],
+    gap: spacing[2],
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   shareButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4CAF50',
+    ...typography.buttonSmall,
+    color: colors.common.white,
   },
   shareHint: {
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.7)',
+    ...typography.caption,
+    color: 'rgba(255, 255, 255, 0.6)',
     textAlign: 'center',
-    marginBottom: 30,
-    paddingHorizontal: 20,
+    marginBottom: spacing[8],
+    paddingHorizontal: spacing[4],
   },
   continueButton: {
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
   },
   continueButtonText: {
-    fontSize: 18,
-    color: '#fff',
-    fontWeight: '600',
+    ...typography.button,
+    color: colors.common.white,
   },
 });
 

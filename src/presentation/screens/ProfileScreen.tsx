@@ -9,13 +9,30 @@ import {
   StatusBar,
   Alert,
   Modal,
-  FlatList,
   TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  User,
+  Gear,
+  Bell,
+  Crown,
+  Star,
+  House,
+  ChartBar,
+  SignOut,
+  Check,
+  X,
+  Plus,
+  Minus,
+  Clock,
+  Calendar,
+  ArrowRight,
+  Shield,
+  Trash,
+} from 'phosphor-react-native';
 import {
   PaymentReminderSettings,
   getDefaultPaymentReminderSettings,
@@ -32,12 +49,14 @@ import {
 } from '../../services/MonetizationService';
 import { MONETIZATION_CONFIG } from '../../services/MonetizationConfig';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { colors } from '../theme/colors';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod } from '../../domain/entities/Finance';
 import { getSavedGroupCode, getSavedGroupName, clearGroupCode } from '../../services/SyncService';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type ProfileNavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -66,6 +85,7 @@ const ProfileScreen: React.FC = () => {
   const [additionalPayment, setAdditionalPayment] = useState('');
   const [groupCode, setGroupCode] = useState<string | null>(null);
   const [groupName, setGroupName] = useState<string | null>(null);
+  const [leaveGroupDialogVisible, setLeaveGroupDialogVisible] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -79,7 +99,6 @@ const ProfileScreen: React.FC = () => {
     }
   }, [showSimulatorModal, financeData]);
 
-  // Recargar datos del simulador cada vez que se abre el modal
   useEffect(() => {
     if (showSimulatorModal) {
       console.log('======= SIMULADOR - Abriendo modal, recargando datos =======');
@@ -97,7 +116,6 @@ const ProfileScreen: React.FC = () => {
             console.log('SIMULADOR - Deudas en último período:', JSON.stringify(lastPeriod.debts));
           }
           
-          // Reconstruir financeData
           let totalIncome = 0;
           let totalFinanceExpenses = 0;
           let totalDebtRemaining = 0;
@@ -158,7 +176,6 @@ const ProfileScreen: React.FC = () => {
             debts: Array.from(uniqueDebts.values())
           });
 
-          // Generar detailedData
           const detailed: any[] = [];
           const maxMonths = Math.max(financePeriods.length, expensePeriods.length);
           for (let i = 0; i < maxMonths; i++) {
@@ -241,14 +258,12 @@ const ProfileScreen: React.FC = () => {
         return;
       }
 
-      // Calcular TOTAL de ingresos de Finanzas
       let totalIncome = 0;
       let totalFinanceExpenses = 0;
       let totalDebtRemaining = 0;
       let totalDebtOriginal = 0;
       let totalMonthlyPayment = 0;
 
-      // Deudas únicas del período más reciente
       const uniqueDebts = new Map<string, { totalAmount: number; remainingAmount: number; monthlyPayment: number; periodIndex: number }>();
 
       financePeriods.forEach((p, periodIndex) => {
@@ -279,16 +294,13 @@ const ProfileScreen: React.FC = () => {
         }
       });
 
-      // Calcular TOTAL de gastos de Luz y Agua
       let totalLuz = 0;
       let totalAgua = 0;
       
       expensePeriods.forEach(p => {
-        // Gastos de luz por piso
         p.floorsElectricity.forEach(floor => {
           totalLuz += floor.consumptionPrice + floor.igv;
         });
-        // Gastos de agua
         totalAgua += p.water.totalReceipt || 0;
       });
 
@@ -296,14 +308,12 @@ const ProfileScreen: React.FC = () => {
       console.log('  Total Luz:', totalLuz);
       console.log('  Total Agua:', totalAgua);
 
-      // Calcular PROMEDIOS
       const totalMonths = Math.max(financePeriods.length, expensePeriods.length, 1);
       const averageIncome = totalIncome / totalMonths;
       const averageFinanceExpenses = totalFinanceExpenses / totalMonths;
       const averageLuz = totalLuz / totalMonths;
       const averageAgua = totalAgua / totalMonths;
       
-      // Total de todos los gastos
       const totalExpenses = totalFinanceExpenses + totalLuz + totalAgua;
       const averageTotalExpenses = averageFinanceExpenses + averageLuz + averageAgua;
 
@@ -326,7 +336,6 @@ const ProfileScreen: React.FC = () => {
         monthlyPayment: totalMonthlyPayment
       });
       
-      // Generar datos detallados por mes
       const detailedData: any[] = [];
       const maxMonths = Math.max(financePeriods.length, expensePeriods.length);
       
@@ -377,8 +386,8 @@ const ProfileScreen: React.FC = () => {
   const handleBuyPremium = () => {
     console.log(`${LOG_PREFIX} handleBuyPremium - ini`);
     Alert.alert(
-      '🎉 ¡Únete a Premium!',
-      `Versión premium por ${MONETIZATION_CONFIG.PRICES.MONTHLY}/mes\n\n✓ Sin publicidad\n✓ Gráficos avanzados\n✓ Exportar a Excel\n✓ Funciones exclusivas\n\n*Esta es una versión de prueba`,
+      'Únete a Premium!',
+      `Versión premium por ${MONETIZATION_CONFIG.PRICES.MONTHLY}/mes\n\nSin publicidad\nGráficos avanzados\nExportar a Excel\nFunciones exclusivas\n\n*Esta es una versión de prueba`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -427,26 +436,17 @@ const ProfileScreen: React.FC = () => {
 
   const handleLeaveGroup = () => {
     console.log(`${LOG_PREFIX} handleLeaveGroup - ini - group: ${groupName || groupCode}`);
-    Alert.alert(
-      '🚪 Abandonar grupo',
-      `¿Estás seguro de que quieres abandonar el grupo "${groupName || groupCode}"?\n\nPerderás acceso a los datos compartidos de la familia.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Abandonar',
-          style: 'destructive',
-          onPress: async () => {
-            console.log(`${LOG_PREFIX} handleLeaveGroup - confirmando`);
-            await clearGroupCode();
-            console.log(`${LOG_PREFIX} handleLeaveGroup - código limpiado`);
-            setGroupCode(null);
-            setGroupName(null);
-            Alert.alert('Listo', 'Has abandonado el grupo. Ahora puedes crear o unirte a otro.');
-            console.log(`${LOG_PREFIX} handleLeaveGroup - fin`);
-          },
-        },
-      ]
-    );
+    setLeaveGroupDialogVisible(true);
+  };
+
+  const confirmLeaveGroup = async () => {
+    console.log(`${LOG_PREFIX} handleLeaveGroup - confirmando`);
+    await clearGroupCode();
+    console.log(`${LOG_PREFIX} handleLeaveGroup - código limpiado`);
+    setGroupCode(null);
+    setGroupName(null);
+    setLeaveGroupDialogVisible(false);
+    navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
   };
 
   const togglePaymentReminders = async (enabled: boolean) => {
@@ -544,520 +544,624 @@ const ProfileScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
-      <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.main} />
+      <View style={styles.header}>
         <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
           <View style={styles.headerContent}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>U</Text>
+                <User size={28} color={colors.primary.main} weight="bold" />
               </View>
             </View>
             <View style={styles.headerTextContainer}>
               <Text style={styles.headerTitle}>Mi Perfil</Text>
               <Text style={styles.headerSubtitle}>Configura tus preferencias</Text>
             </View>
+            <Gear size={22} color={colors.textInverse} />
           </View>
         </SafeAreaView>
-      </LinearGradient>
+      </View>
 
       <SafeAreaView style={styles.contentContainer} edges={['bottom']}>
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚡ Luz y Agua</Text>
-          <Text style={styles.sectionDescription}>
-            Gestiona los servicios de tu hogar
-          </Text>
-          
-          <TouchableOpacity 
-            style={styles.utilityButton}
-            onPress={() => navigation.navigate('FloorsConfig')}
-          >
-            <LinearGradient
-              colors={['#2196F3', '#1976D2']}
-              style={styles.utilityButtonGradient}
-            >
-              <Text style={styles.utilityButtonIcon}>🏠</Text>
-              <View style={styles.utilityButtonContent}>
-                <Text style={styles.utilityButtonTitle}>Configurar Pisos</Text>
-                <Text style={styles.utilityButtonSubtitle}>
-                  Número de pisos y medidores
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconCircle, { backgroundColor: colors.primary.light }]}>
+                <House size={18} color={colors.primary.main} weight="fill" />
+              </View>
+              <View style={styles.sectionHeaderText}>
+                <Text style={styles.sectionTitle}>Luz y Agua</Text>
+                <Text style={styles.sectionDescription}>
+                  Gestiona los servicios de tu hogar
                 </Text>
               </View>
-              <Text style={styles.utilityButtonArrow}>›</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          
-          <Text style={styles.tabHint}>
-            💡 Para ver Gastos, usa la pestaña inferior
-          </Text>
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📊 Simulador de Deudas</Text>
-          <Text style={styles.sectionDescription}>
-            Calcula cuánto tiempo teará pagar tus deudas
-          </Text>
-          
-          {!financeData ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>📈</Text>
-              <Text style={styles.emptyText}>
-                No hay datos de finanzas registrados.{'\n'}
-                Agrega ingresos y gastos en la sección Finanzas.
-              </Text>
             </View>
-          ) : (
-            <TouchableOpacity 
-              style={styles.utilityButton}
-              onPress={() => setShowSimulatorModal(true)}
+
+            <TouchableOpacity
+              style={styles.actionCard}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('FloorsConfig')}
             >
-              <LinearGradient
-                colors={['#4CAF50', '#388E3C']}
-                style={styles.utilityButtonGradient}
-              >
-                <Text style={styles.utilityButtonIcon}>📊</Text>
-                <View style={styles.utilityButtonContent}>
-                  <Text style={styles.utilityButtonTitle}>Abrir Simulador</Text>
-                  <Text style={styles.utilityButtonSubtitle}>
-                    Ver análisis detallado por mes
+              <View style={styles.actionCardContent}>
+                <View style={[styles.actionIconWrap, { backgroundColor: colors.accent.blueLight }]}>
+                  <House size={20} color={colors.accent.blue} weight="fill" />
+                </View>
+                <View style={styles.actionTextContent}>
+                  <Text style={styles.actionTitle}>Configurar Pisos</Text>
+                  <Text style={styles.actionSubtitle}>
+                    Número de pisos y medidores
                   </Text>
                 </View>
-                <Text style={styles.utilityButtonArrow}>›</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>👑 Premium</Text>
-          
-          {isPremium ? (
-            <View style={styles.premiumActiveCard}>
-              <View style={styles.premiumBadge}>
-                <Text style={styles.premiumBadgeText}>✓ PREMIUM ACTIVO</Text>
+                <ArrowRight size={18} color={colors.textMuted} />
               </View>
-              <Text style={styles.premiumActiveText}>
-                ¡Gracias por ser Premium! Disfrutas de todas las funciones sin publicidad.
+            </TouchableOpacity>
+
+            <View style={styles.hintContainer}>
+              <Bell size={14} color={colors.textMuted} />
+              <Text style={styles.hintText}>
+                Para ver Gastos, usa la pestaña inferior
               </Text>
-              <TouchableOpacity style={styles.restoreButton} onPress={handleRestorePremium}>
-                <Text style={styles.restoreButtonText}>Restaurar compra</Text>
-              </TouchableOpacity>
             </View>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.premiumButton} onPress={handleBuyPremium}>
-                <LinearGradient
-                  colors={['#FFD700', '#FFA500']}
-                  style={styles.premiumButtonGradient}
-                >
-                  <Text style={styles.premiumButtonIcon}>⭐</Text>
-                  <View style={styles.premiumButtonContent}>
-                    <Text style={styles.premiumButtonTitle}>¡Desbloquea Premium!</Text>
-                    <Text style={styles.premiumButtonSubtitle}>
-                      Por solo S/9.90/mes
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconCircle, { backgroundColor: colors.accent.greenLight }]}>
+                <ChartBar size={18} color={colors.accent.green} weight="fill" />
+              </View>
+              <View style={styles.sectionHeaderText}>
+                <Text style={styles.sectionTitle}>Simulador de Deudas</Text>
+                <Text style={styles.sectionDescription}>
+                  Calcula cuánto tiempo teará pagar tus deudas
+                </Text>
+              </View>
+            </View>
+
+            {!financeData ? (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIconCircle}>
+                  <ChartBar size={32} color={colors.textMuted} weight="light" />
+                </View>
+                <Text style={styles.emptyText}>
+                  No hay datos de finanzas registrados.{'\n'}
+                  Agrega ingresos y gastos en la sección Finanzas.
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.actionCard}
+                activeOpacity={0.7}
+                onPress={() => setShowSimulatorModal(true)}
+              >
+                <View style={styles.actionCardContent}>
+                  <View style={[styles.actionIconWrap, { backgroundColor: colors.accent.greenLight }]}>
+                    <ChartBar size={20} color={colors.accent.green} weight="fill" />
+                  </View>
+                  <View style={styles.actionTextContent}>
+                    <Text style={styles.actionTitle}>Abrir Simulador</Text>
+                    <Text style={styles.actionSubtitle}>
+                      Ver análisis detallado por mes
                     </Text>
                   </View>
-                  <Text style={styles.premiumButtonArrow}>›</Text>
-                </LinearGradient>
+                  <ArrowRight size={18} color={colors.textMuted} />
+                </View>
               </TouchableOpacity>
+            )}
+          </View>
 
-              <View style={styles.premiumFeatures}>
-                <Text style={styles.premiumFeaturesTitle}>¿Qué incluye?</Text>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>🚫</Text>
-                  <Text style={styles.featureText}>Sin publicidad</Text>
+          <View style={styles.divider} />
+
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningLight }]}>
+                <Crown size={18} color={colors.warning} weight="fill" />
+              </View>
+              <View style={styles.sectionHeaderText}>
+                <Text style={styles.sectionTitle}>Premium</Text>
+              </View>
+            </View>
+
+            {isPremium ? (
+              <View style={styles.premiumActiveCard}>
+                <View style={styles.premiumBadge}>
+                  <Check size={14} color={colors.common.white} weight="bold" />
+                  <Text style={styles.premiumBadgeText}>PREMIUM ACTIVO</Text>
                 </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>📊</Text>
-                  <Text style={styles.featureText}>Gráficos avanzados de gastos</Text>
+                <Text style={styles.premiumActiveText}>
+                  ¡Gracias por ser Premium! Disfrutas de todas las funciones sin publicidad.
+                </Text>
+                <TouchableOpacity style={styles.restoreButton} onPress={handleRestorePremium}>
+                  <Text style={styles.restoreButtonText}>Restaurar compra</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.premiumButton}
+                  activeOpacity={0.8}
+                  onPress={handleBuyPremium}
+                >
+                  <View style={styles.premiumButtonInner}>
+                    <View style={styles.premiumButtonIconWrap}>
+                      <Star size={22} color={colors.common.white} weight="fill" />
+                    </View>
+                    <View style={styles.premiumButtonTextContent}>
+                      <Text style={styles.premiumButtonTitle}>¡Desbloquea Premium!</Text>
+                      <Text style={styles.premiumButtonSubtitle}>
+                        Por solo S/9.90/mes
+                      </Text>
+                    </View>
+                    <ArrowRight size={20} color={colors.common.white} />
+                  </View>
+                </TouchableOpacity>
+
+                <View style={styles.premiumFeatures}>
+                  <Text style={styles.premiumFeaturesTitle}>¿Qué incluye?</Text>
+                  <View style={styles.featureItem}>
+                    <View style={[styles.featureDot, { backgroundColor: colors.accent.green }]}>
+                      <Check size={12} color={colors.common.white} weight="bold" />
+                    </View>
+                    <Text style={styles.featureText}>Sin publicidad</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <View style={[styles.featureDot, { backgroundColor: colors.accent.green }]}>
+                      <Check size={12} color={colors.common.white} weight="bold" />
+                    </View>
+                    <Text style={styles.featureText}>Gráficos avanzados de gastos</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <View style={[styles.featureDot, { backgroundColor: colors.accent.green }]}>
+                      <Check size={12} color={colors.common.white} weight="bold" />
+                    </View>
+                    <Text style={styles.featureText}>Exportar a Excel/PDF</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <View style={[styles.featureDot, { backgroundColor: colors.accent.green }]}>
+                      <Check size={12} color={colors.common.white} weight="bold" />
+                    </View>
+                    <Text style={styles.featureText}>Funciones exclusivas</Text>
+                  </View>
                 </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>📑</Text>
-                  <Text style={styles.featureText}>Exportar a Excel/PDF</Text>
+              </>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconCircle, { backgroundColor: colors.warningLight }]}>
+                <Bell size={18} color={colors.warning} weight="fill" />
+              </View>
+              <View style={styles.sectionHeaderText}>
+                <Text style={styles.sectionTitle}>Recordatorios de Pago</Text>
+                <Text style={styles.sectionDescription}>
+                  Notificaciones para pagar recibos
+                </Text>
+              </View>
+              <Switch
+                value={paymentSettings.enabled}
+                onValueChange={togglePaymentReminders}
+                trackColor={{ false: colors.border, true: colors.primary.main }}
+                thumbColor={paymentSettings.enabled ? colors.common.white : colors.common.white}
+              />
+            </View>
+          </View>
+
+          {paymentSettings.enabled && (
+            <>
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Calendar size={18} color={colors.primary.main} weight="fill" />
+                  <Text style={styles.cardTitle}>Días de recordatorio</Text>
                 </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>🎯</Text>
-                  <Text style={styles.featureText}>Funciones exclusivas</Text>
+                <Text style={styles.cardDescription}>
+                  Selecciona los días del mes
+                </Text>
+
+                <View style={styles.calendarGrid}>
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
+                    const isSelected = paymentSettings.days.includes(day);
+                    return (
+                      <TouchableOpacity
+                        key={`day-${day}`}
+                        style={[styles.calendarDay, isSelected && styles.calendarDayActive]}
+                        onPress={() => toggleDay(day)}
+                      >
+                        {isSelected ? (
+                          <Check size={14} color={colors.common.white} weight="bold" />
+                        ) : (
+                          <Text style={styles.calendarDayText}>{day}</Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.selectedDaysInfo}>
+                  <Check size={14} color={colors.warning} weight="bold" />
+                  <Text style={styles.selectedDaysText}>
+                    {getDaysText()} seleccionado{paymentSettings.days.length > 1 ? 's' : ''}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Clock size={18} color={colors.primary.main} weight="fill" />
+                  <Text style={styles.cardTitle}>Hora del recordatorio</Text>
+                </View>
+
+                <View style={styles.hourSelector}>
+                  <TouchableOpacity
+                    style={styles.hourButton}
+                    onPress={() => updateHour(Math.max(6, paymentSettings.hour - 1))}
+                  >
+                    <Minus size={20} color={colors.text} weight="bold" />
+                  </TouchableOpacity>
+
+                  <View style={styles.hourDisplay}>
+                    <Text style={styles.hourText} numberOfLines={1}>
+                      {formatTime(paymentSettings.hour, paymentSettings.minute)}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.hourButton}
+                    onPress={() => updateHour(Math.min(22, paymentSettings.hour + 1))}
+                  >
+                    <Plus size={20} color={colors.text} weight="bold" />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.minuteLabel}>Minutos</Text>
+                <View style={styles.minuteGrid}>
+                  {[0, 15, 30, 45].map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[
+                        styles.minuteButton,
+                        paymentSettings.minute === m && styles.minuteButtonActive,
+                      ]}
+                      onPress={() => updateMinute(m)}
+                    >
+                      <Text style={[
+                        styles.minuteButtonText,
+                        paymentSettings.minute === m && styles.minuteButtonTextActive,
+                      ]}>
+                        :{m.toString().padStart(2, '0')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.infoCard}>
+                <Bell size={16} color={colors.primary.main} weight="fill" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoTitle}>Resumen</Text>
+                  <Text style={styles.infoText}>
+                    Recordatorios los {getDaysText()} de cada mes a las {formatTime(paymentSettings.hour, paymentSettings.minute)} hrs.
+                  </Text>
                 </View>
               </View>
             </>
           )}
-        </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>💡</Text>
-            <View style={styles.sectionHeaderText}>
-              <Text style={styles.sectionTitle}>Recordatorios de Pago</Text>
-              <Text style={styles.sectionDescription}>
-                Notificaciones para pagar recibos
+          {!paymentSettings.enabled && (
+            <View style={styles.disabledCard}>
+              <View style={styles.disabledIconCircle}>
+                <Bell size={28} color={colors.textMuted} weight="light" />
+              </View>
+              <Text style={styles.disabledTitle}>Recordatorios de pago desactivados</Text>
+              <Text style={styles.disabledText}>
+                Activa para recibir notificaciones y no olvidar pagar tus recibos.
               </Text>
             </View>
-            <Switch
-              value={paymentSettings.enabled}
-              onValueChange={togglePaymentReminders}
-              trackColor={{ false: '#ccc', true: '#FF9800' }}
-              thumbColor={paymentSettings.enabled ? '#fff' : '#f4f3f4'}
-            />
-          </View>
-        </View>
+          )}
 
-        {paymentSettings.enabled && (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>📅 Días de recordatorio</Text>
-              <Text style={styles.cardDescription}>
-                Selecciona los días del mes
-              </Text>
+          {groupCode && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: colors.accent.blueLight }]}>
+                    <User size={18} color={colors.accent.blue} weight="fill" />
+                  </View>
+                  <View style={styles.sectionHeaderText}>
+                    <Text style={styles.sectionTitle}>Mi Familia</Text>
+                    <Text style={styles.sectionDescription}>
+                      Código para compartir con tu familia
+                    </Text>
+                  </View>
+                </View>
 
-              <View style={styles.calendarGrid}>
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
-                  const isSelected = paymentSettings.days.includes(day);
-                  return (
-                    <TouchableOpacity
-                      key={`day-${day}`}
-                      style={[styles.calendarDay, isSelected && styles.calendarDayActive]}
-                      onPress={() => toggleDay(day)}
-                    >
-                      <Text style={[styles.calendarDayText, isSelected && styles.calendarDayTextActive]}>
-                        {day}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={styles.selectedDaysInfo}>
-                <Text style={styles.selectedDaysText}>
-                  ✓ {getDaysText()} seleccionado{paymentSettings.days.length > 1 ? 's' : ''}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>⏰ Hora del recordatorio</Text>
-
-              <View style={styles.hourSelector}>
-                <TouchableOpacity
-                  style={styles.hourButton}
-                  onPress={() => updateHour(Math.max(6, paymentSettings.hour - 1))}
-                >
-                  <Text style={styles.hourButtonText}>−</Text>
-                </TouchableOpacity>
-
-                <View style={styles.hourDisplay}>
-                  <Text style={styles.hourText}>
-                    {formatTime(paymentSettings.hour, paymentSettings.minute)}
-                  </Text>
+                <View style={styles.groupCodeCard}>
+                  <Text style={styles.groupCodeLabel}>Código del grupo</Text>
+                  <Text style={styles.groupCodeValue} numberOfLines={1} adjustsFontSizeToFit>{groupCode}</Text>
+                  {groupName && (
+                    <Text style={styles.groupNameText}>Grupo: {groupName}</Text>
+                  )}
                 </View>
 
                 <TouchableOpacity
-                  style={styles.hourButton}
-                  onPress={() => updateHour(Math.min(22, paymentSettings.hour + 1))}
+                  style={styles.leaveGroupButton}
+                  onPress={handleLeaveGroup}
                 >
-                  <Text style={styles.hourButtonText}>+</Text>
+                  <SignOut size={18} color={colors.error} weight="bold" />
+                  <Text style={styles.leaveGroupButtonText}>Abandonar grupo</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          <View style={styles.bottomSpacer} />
+
+          <Modal
+            visible={showSimulatorModal}
+            animationType="slide"
+            transparent={false}
+            onRequestClose={() => setShowSimulatorModal(false)}
+          >
+            <StatusBar backgroundColor={colors.primary.main} barStyle="light-content" />
+            <SafeAreaView style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderLeft}>
+                  <ChartBar size={22} color={colors.common.white} weight="fill" />
+                  <Text style={styles.modalTitle}>Simulador de Deudas</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowSimulatorModal(false)}
+                >
+                  <X size={22} color={colors.common.white} weight="bold" />
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.minuteLabel}>Minutos</Text>
-              <View style={styles.minuteGrid}>
-                {[0, 15, 30, 45].map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[
-                      styles.minuteButton,
-                      paymentSettings.minute === m && styles.minuteButtonActive,
-                    ]}
-                    onPress={() => updateMinute(m)}
-                  >
-                    <Text style={[
-                      styles.minuteButtonText,
-                      paymentSettings.minute === m && styles.minuteButtonTextActive,
-                    ]}>
-                      :{m.toString().padStart(2, '0')}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.infoCard}>
-              <Text style={styles.infoIcon}>💡</Text>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoTitle}>Resumen</Text>
-                <Text style={styles.infoText}>
-                  Recordatorios los {getDaysText()} de cada mes a las {formatTime(paymentSettings.hour, paymentSettings.minute)} hrs.
-                </Text>
-              </View>
-            </View>
-          </>
-        )}
-
-        {!paymentSettings.enabled && (
-          <View style={styles.disabledCard}>
-            <Text style={styles.disabledIcon}>🔕</Text>
-            <Text style={styles.disabledTitle}>Recordatorios de pago desactivados</Text>
-            <Text style={styles.disabledText}>
-              Activa para recibir notificaciones y no olvidar pagar tus recibos.
-            </Text>
-          </View>
-        )}
-
-        {groupCode && (
-          <>
-            <View style={styles.divider} />
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>👨‍👩‍👧‍👦 Mi Familia</Text>
-              <Text style={styles.sectionDescription}>
-                Código para compartir con tu familia
-              </Text>
-              <View style={styles.groupCodeCard}>
-                <Text style={styles.groupCodeLabel}>Código del grupo:</Text>
-                <Text style={styles.groupCodeValue}>{groupCode}</Text>
-                {groupName && (
-                  <Text style={styles.groupNameText}>Grupo: {groupName}</Text>
-                )}
-              </View>
-              <TouchableOpacity 
-                style={styles.leaveGroupButton}
-                onPress={handleLeaveGroup}
-              >
-                <Text style={styles.leaveGroupButtonText}>🚪 Abandonar grupo</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-
-        <View style={styles.bottomSpacer} />
-
-      <Modal
-        visible={showSimulatorModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowSimulatorModal(false)}
-      >
-        <StatusBar backgroundColor="#1565C0" barStyle="light-content" />
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>📊 Simulador de Deudas</Text>
-            <TouchableOpacity onPress={() => setShowSimulatorModal(false)}>
-              <Text style={styles.modalClose}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
-            {/* Deudas Pendientes - Todos los períodos no pagados */}
-            {financeData && financeData.totalDebtRemaining > 0 && (
-              <View style={styles.modalSummaryCard}>
-                <Text style={styles.modalSummaryTitle}>🏦 Deudas Pendientes</Text>
-                
-                {detailedData.length > 0 && (
-                  <>
-                    {(() => {
-                      console.log('=== RENDER Deudas Pendientes ===');
-                      console.log('detailedData length:', detailedData.length);
-                      detailedData.forEach((item, index) => {
-                        console.log(`Periodo ${index}: ${item.month} ${item.year}`);
-                        console.log('  debtDetails:', JSON.stringify(item.debtDetails));
-                      });
-                      return null;
-                    })()}
-                    {detailedData.map((item, index) => {
-                      const debts = item?.debtDetails?.filter((d: any) => d.remaining > 0 && !d.paidThisMonth) || [];
-                      console.log(`Render ${item.month}: ${debts.length} debts pendientes (no pagadas)`);
-                      if (debts.length === 0) return null;
-                      const isCurrent = index === detailedData.length - 1;
-                      return (
-                        <View key={index} style={styles.debtItemCard}>
-                          <Text style={styles.debtItemTitle}>
-                            {item.month} {item.year} {isCurrent ? '(Actual)' : ''}
-                          </Text>
-                          {debts.map((d: any, i: number) => (
-                            <View key={i} style={styles.debtItemRow}>
-                              <Text style={styles.debtItemName}>• {d.name}</Text>
-                              <Text style={styles.debtItemAmount}>S/ {d.remaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+              <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
+                {financeData && financeData.totalDebtRemaining > 0 && (
+                  <View style={styles.modalSummaryCard}>
+                    <View style={styles.modalSummaryHeader}>
+                      <Shield size={20} color={colors.primary.main} weight="fill" />
+                      <Text style={styles.modalSummaryTitle}>Deudas Pendientes</Text>
+                    </View>
+                    
+                    {detailedData.length > 0 && (
+                      <>
+                        {(() => {
+                          console.log('=== RENDER Deudas Pendientes ===');
+                          console.log('detailedData length:', detailedData.length);
+                          detailedData.forEach((item, index) => {
+                            console.log(`Periodo ${index}: ${item.month} ${item.year}`);
+                            console.log('  debtDetails:', JSON.stringify(item.debtDetails));
+                          });
+                          return null;
+                        })()}
+                        {detailedData.map((item, index) => {
+                          const debts = item?.debtDetails?.filter((d: any) => d.remaining > 0 && !d.paidThisMonth) || [];
+                          console.log(`Render ${item.month}: ${debts.length} debts pendientes (no pagadas)`);
+                          if (debts.length === 0) return null;
+                          const isCurrent = index === detailedData.length - 1;
+                          return (
+                            <View key={index} style={styles.debtItemCard}>
+                              <View style={styles.debtItemHeader}>
+                                <Text style={styles.debtItemTitle}>
+                                  {item.month} {item.year}
+                                </Text>
+                                {isCurrent && (
+                                  <View style={styles.currentBadge}>
+                                    <Text style={styles.currentBadgeText}>Actual</Text>
+                                  </View>
+                                )}
+                              </View>
+                              {debts.map((d: any, i: number) => (
+                                <View key={i} style={styles.debtItemRow}>
+                                  <View style={styles.debtItemDot} />
+                                  <Text style={styles.debtItemName}>{d.name}</Text>
+                                  <Text style={styles.debtItemAmount}>S/ {d.remaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                                </View>
+                              ))}
                             </View>
-                          ))}
+                          );
+                        })}
+                      </>
+                    )}
+
+                    <View style={styles.modalSummaryDivider} />
+                    <View style={styles.modalSummaryRow}>
+                      <Text style={styles.modalSummaryLabel}>Deuda total (original)</Text>
+                      <Text style={[styles.modalSummaryValue, { color: colors.primary.main }]} numberOfLines={1}>S/ {(financeData.totalDebtOriginal || 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                    </View>
+                    <View style={styles.modalSummaryRow}>
+                      <Text style={styles.modalSummaryLabel}>Total pendiente</Text>
+                      <Text style={[styles.modalSummaryValue, { color: colors.warning, fontSize: 18 }]} numberOfLines={1}>S/ {financeData.totalDebtRemaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                    </View>
+                    <View style={styles.modalSummaryRow}>
+                      <Text style={styles.modalSummaryLabel}>Pago mensual</Text>
+                      <Text style={styles.modalSummaryValue} numberOfLines={1}>S/ {financeData.monthlyPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {financeData && financeData.totalDebtRemaining === 0 && (
+                  <View style={styles.modalSummaryCard}>
+                    <View style={styles.modalSuccessIconCircle}>
+                      <Check size={32} color={colors.success} weight="bold" />
+                    </View>
+                    <Text style={styles.modalSuccessTitle}>Sin Deudas</Text>
+                    <Text style={styles.modalSuccessText}>¡Felicitaciones! No tienes deudas pendientes en este momento.</Text>
+                  </View>
+                )}
+
+                {financeData && financeData.totalDebtRemaining > 0 && (
+                  <View style={styles.modalSimulatorSection}>
+                    <View style={styles.modalSimulatorHeader}>
+                      <ChartBar size={20} color={colors.primary.main} weight="fill" />
+                      <Text style={styles.modalSectionTitle}>Simular Tiempo de Pago</Text>
+                    </View>
+                    
+                    <View style={styles.modalInputSection}>
+                      <Text style={styles.modalInputLabel}>Ingresa tus propios valores (opcional):</Text>
+                      
+                      <View style={styles.modalInputRow}>
+                        <Text style={styles.modalInputLabelSmall}>Ingreso mensual (S/):</Text>
+                        <TextInput
+                          style={styles.modalInput}
+                          value={manualIncome}
+                          onChangeText={text => setManualIncome(text.replace(/[^0-9.]/g, ''))}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor={colors.input.placeholder}
+                          returnKeyType="done"
+                          blurOnSubmit={false}
+                        />
+                      </View>
+                      
+                      <View style={styles.modalInputRow}>
+                        <Text style={styles.modalInputLabelSmall}>Total Gastos + Servicios (S/):</Text>
+                        <TextInput
+                          style={styles.modalInput}
+                          value={manualExpenses}
+                          onChangeText={text => setManualExpenses(text.replace(/[^0-9.]/g, ''))}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor={colors.input.placeholder}
+                          returnKeyType="done"
+                          blurOnSubmit={false}
+                        />
+                      </View>
+                    </View>
+
+                    {(() => {
+                      const hasIncome = manualIncome.trim() !== '';
+                      const hasExpenses = manualExpenses.trim() !== '';
+                      const hasValues = hasIncome || hasExpenses;
+                      
+                      if (!hasValues) {
+                        return (
+                          <View style={styles.modalAvailableCard}>
+                            <Text style={styles.modalAvailableLabel}>Disponible (Ingresos - Gastos)</Text>
+                            <Text style={[styles.modalAvailableValue, { color: colors.textMuted }]}>
+                              S/ 0.00
+                            </Text>
+                            <Text style={styles.modalHintText}>Ingresa valores arriba para calcular</Text>
+                          </View>
+                        );
+                      }
+                      
+                      const income = parseFloat(manualIncome) || 0;
+                      const expenses = parseFloat(manualExpenses) || 0;
+                      const available = income - expenses;
+                      
+                      return (
+                        <View style={styles.modalAvailableCard}>
+                          <Text style={styles.modalAvailableLabel}>Disponible (Ingresos - Gastos)</Text>
+                          <Text style={[styles.modalAvailableValue, { color: available >= 0 ? colors.success : colors.error }]}>
+                            S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
+                          </Text>
+                          {available < 0 && (
+                            <View style={styles.warningRow}>
+                              <X size={14} color={colors.error} weight="bold" />
+                              <Text style={styles.modalWarningText}>Tus gastos superan tus ingresos</Text>
+                            </View>
+                          )}
                         </View>
                       );
-                    })}
-                  </>
+                    })()}
+
+                    <View style={styles.modalInputSection}>
+                      <Text style={styles.modalInputLabel}>¿Cuánto adicional quieres usar para pagar deudas?</Text>
+                      
+                      <View style={styles.modalInputRow}>
+                        <Text style={styles.modalInputLabelSmall}>Monto adicional mensual (S/):</Text>
+                        <TextInput
+                          style={styles.modalInput}
+                          value={additionalPayment}
+                          onChangeText={text => setAdditionalPayment(text.replace(/[^0-9.]/g, ''))}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor={colors.input.placeholder}
+                          returnKeyType="done"
+                          blurOnSubmit={false}
+                        />
+                      </View>
+                    </View>
+
+                    {(() => {
+                      const income = parseFloat(manualIncome) || financeData.averageIncome;
+                      const expenses = parseFloat(manualExpenses) || financeData.averageExpenses;
+                      const additional = parseFloat(additionalPayment) || 0;
+                      const available = income - expenses;
+                      const totalPayment = available + additional;
+                      
+                      const monthsRemaining = totalPayment > 0 ? Math.ceil(financeData.totalDebtRemaining / totalPayment) : 0;
+                      const today = new Date();
+                      const futureDate = new Date(today.getFullYear(), today.getMonth() + monthsRemaining, today.getDate());
+                      const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                      
+                      return (
+                        <View style={styles.modalResultCard}>
+                          {monthsRemaining > 0 && monthsRemaining <= 600 ? (
+                            <>
+                              <View style={styles.resultSuccessIcon}>
+                                <Check size={24} color={colors.success} weight="bold" />
+                              </View>
+                              <Text style={styles.modalResultValue}>Libre de deudas en {monthsRemaining} meses</Text>
+                              <Text style={styles.modalResultDate}>Fecha estimada: {monthNames[futureDate.getMonth()]} {futureDate.getFullYear()}</Text>
+                              <Text style={styles.modalResultSubtext} numberOfLines={3}>
+                                Pagando S/ {totalPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}/mes{'\n'}
+                                (S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })} disponible + S/ {additional.toLocaleString('es-PE', { minimumFractionDigits: 2 })} adicional)
+                              </Text>
+                            </>
+                          ) : totalPayment <= 0 ? (
+                            <View style={styles.resultWarningContent}>
+                              <X size={20} color={colors.error} weight="bold" />
+                              <Text style={styles.modalResultWarning}>
+                                Ingresa un monto adicional para pagar tus deudas{'\n'}
+                                o increase tus ingresos
+                              </Text>
+                            </View>
+                          ) : (
+                            <View style={styles.resultWarningContent}>
+                              <X size={20} color={colors.error} weight="bold" />
+                              <Text style={styles.modalResultWarning}>
+                                El tiempo de pago es muy extenso.{'\n'}
+                                Considera aumentar el monto adicional.
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
+                  </View>
                 )}
 
-                <View style={styles.modalSummaryRow}>
-                  <Text style={styles.modalSummaryLabel}>Deuda total (original):</Text>
-                  <Text style={[styles.modalSummaryValue, { color: '#1565C0' }]}>S/ {(financeData.totalDebtOriginal || 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
-                </View>
-                <View style={[styles.modalSummaryRow, { borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: 10, marginTop: 5 }]}>
-                  <Text style={styles.modalSummaryLabel}>Total pendiente:</Text>
-                  <Text style={[styles.modalSummaryValue, { color: '#FF9800', fontSize: 18 }]}>S/ {financeData.totalDebtRemaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
-                </View>
-                <View style={styles.modalSummaryRow}>
-                  <Text style={styles.modalSummaryLabel}>Pago mensual:</Text>
-                  <Text style={styles.modalSummaryValue}>S/ {financeData.monthlyPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
-                </View>
-              </View>
-            )}
-
-            {financeData && financeData.totalDebtRemaining === 0 && (
-              <View style={styles.modalSummaryCard}>
-                <Text style={styles.modalSuccessTitle}>✅ Sin Deudas</Text>
-                <Text style={styles.modalSuccessText}>¡Felicitaciones! No tienes deudas pendientes en este momento.</Text>
-              </View>
-            )}
-
-            {/* Simulador */}
-            {financeData && financeData.totalDebtRemaining > 0 && (
-              <View style={styles.modalSimulatorSection}>
-                <Text style={styles.modalSectionTitle}>🎯 Simular Tiempo de Pago</Text>
-                
-                {/* Editor de Ingresos y Gastos */}
-                <View style={styles.modalInputSection}>
-                  <Text style={styles.modalInputLabel}>📝 Ingresa tus propios valores (opcional):</Text>
-                  
-                  <View style={styles.modalInputRow}>
-                    <Text style={styles.modalInputLabelSmall}>Ingreso mensual (S/):</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={manualIncome}
-                      onChangeText={text => setManualIncome(text.replace(/[^0-9.]/g, ''))}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor="#999"
-                      returnKeyType="done"
-                      blurOnSubmit={false}
-                    />
-                  </View>
-                  
-                  <View style={styles.modalInputRow}>
-                    <Text style={styles.modalInputLabelSmall}>Total Gastos + Servicios (S/):</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={manualExpenses}
-                      onChangeText={text => setManualExpenses(text.replace(/[^0-9.]/g, ''))}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor="#999"
-                      returnKeyType="done"
-                      blurOnSubmit={false}
-                    />
-                  </View>
-                </View>
-
-                {/* Cálculo del Disponible - solo mostrar cuando usuario ingrese valores */}
-                {(() => {
-                  const hasIncome = manualIncome.trim() !== '';
-                  const hasExpenses = manualExpenses.trim() !== '';
-                  const hasValues = hasIncome || hasExpenses;
-                  
-                  if (!hasValues) {
-                    return (
-                      <View style={styles.modalAvailableCard}>
-                        <Text style={styles.modalAvailableLabel}>💰 Disponible (Ingresos - Gastos):</Text>
-                        <Text style={[styles.modalAvailableValue, { color: '#666' }]}>
-                          S/ 0.00
-                        </Text>
-                        <Text style={styles.modalHintText}>Ingresa valores arriba para calcular</Text>
-                      </View>
-                    );
-                  }
-                  
-                  const income = parseFloat(manualIncome) || 0;
-                  const expenses = parseFloat(manualExpenses) || 0;
-                  const available = income - expenses;
-                  
-                  return (
-                    <View style={styles.modalAvailableCard}>
-                      <Text style={styles.modalAvailableLabel}>💰 Disponible (Ingresos - Gastos):</Text>
-                      <Text style={[styles.modalAvailableValue, { color: available >= 0 ? '#43A047' : '#E53935' }]}>
-                        S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
-                      </Text>
-                      {available < 0 && (
-                        <Text style={styles.modalWarningText}>⚠️ Tus gastos superan tus ingresos</Text>
-                      )}
+                {financeData && financeData.totalDebtRemaining === 0 && (
+                  <View style={styles.modalResultCard}>
+                    <View style={styles.resultSuccessIcon}>
+                      <Check size={28} color={colors.success} weight="bold" />
                     </View>
-                  );
-                })()}
-
-                {/* Pago adicional para deudas */}
-                <View style={styles.modalInputSection}>
-                  <Text style={styles.modalInputLabel}>💳 ¿Cuánto adicional quieres usar para pagar deudas?</Text>
-                  
-                  <View style={styles.modalInputRow}>
-                    <Text style={styles.modalInputLabelSmall}>Monto adicional mensual (S/):</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={additionalPayment}
-                      onChangeText={text => setAdditionalPayment(text.replace(/[^0-9.]/g, ''))}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor="#999"
-                      returnKeyType="done"
-                      blurOnSubmit={false}
-                    />
+                    <Text style={styles.modalResultSuccess}>¡Felicitaciones! No tienes deudas pendientes</Text>
                   </View>
-                </View>
+                )}
 
-                {/* Resultado del cálculo */}
-                {(() => {
-                  const income = parseFloat(manualIncome) || financeData.averageIncome;
-                  const expenses = parseFloat(manualExpenses) || financeData.averageExpenses;
-                  const additional = parseFloat(additionalPayment) || 0;
-                  const available = income - expenses;
-                  const totalPayment = available + additional;
-                  
-                  const monthsRemaining = totalPayment > 0 ? Math.ceil(financeData.totalDebtRemaining / totalPayment) : 0;
-                  const today = new Date();
-                  const futureDate = new Date(today.getFullYear(), today.getMonth() + monthsRemaining, today.getDate());
-                  const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-                  
-                  return (
-                    <View style={styles.modalResultCard}>
-                      {monthsRemaining > 0 && monthsRemaining <= 600 ? (
-                        <>
-                          <Text style={styles.modalResultValue}>✓ Libre de deudas en {monthsRemaining} meses</Text>
-                          <Text style={styles.modalResultDate}>Fecha estimada: {monthNames[futureDate.getMonth()]} {futureDate.getFullYear()}</Text>
-                          <Text style={styles.modalResultSubtext}>
-                            Pagando S/ {totalPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}/mes{'\n'}
-                            (S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })} disponible + S/ {additional.toLocaleString('es-PE', { minimumFractionDigits: 2 })} adicional)
-                          </Text>
-                        </>
-                      ) : totalPayment <= 0 ? (
-                        <Text style={styles.modalResultWarning}>
-                          ⚠️ Ingresa un monto adicional para pagar tus deudas{'\n'}
-                          o increase tus ingresos
-                        </Text>
-                      ) : (
-                        <Text style={styles.modalResultWarning}>
-                          ⚠️ El tiempo de pago es muy extenso.{'\n'}
-                          Considera aumentar el monto adicional.
-                        </Text>
-                      )}
-                    </View>
-                  );
-                })()}
-              </View>
-            )}
-
-            {financeData && financeData.totalDebtRemaining === 0 && (
-              <View style={styles.modalResultCard}>
-                <Text style={styles.modalResultSuccess}>🎉 ¡Felicitaciones! No tienes deudas pendientes</Text>
-              </View>
-            )}
-
-            <View style={styles.modalSpacer} />
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-      </ScrollView>
+                <View style={styles.modalSpacer} />
+              </ScrollView>
+            </SafeAreaView>
+          </Modal>
+        </ScrollView>
       </SafeAreaView>
+
+      <ConfirmDialog
+        visible={leaveGroupDialogVisible}
+        title="Abandonar grupo"
+        message={`¿Estás seguro de que quieres abandonar el grupo "${groupName || groupCode}"? Perderás acceso a los datos compartidos de la familia.`}
+        confirmText="Abandonar"
+        onConfirm={confirmLeaveGroup}
+        onCancel={() => setLeaveGroupDialogVisible(false)}
+      />
     </View>
   );
 };
@@ -1072,990 +1176,735 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingBottom: 20,
+    backgroundColor: colors.primary.main,
+    paddingBottom: spacing[24],
   },
   headerSafeArea: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing[20],
+    paddingTop: spacing[8],
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatarContainer: {
-    marginRight: 16,
+    marginRight: spacing[16],
   },
   avatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+    width: 64,
+    height: 64,
+    borderRadius: borderRadius.xl,
     backgroundColor: colors.primary.light,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: colors.primary.main,
-  },
-  avatarText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.header.text,
+    borderWidth: 2,
+    borderColor: colors.common.white,
   },
   headerTextContainer: {
     flex: 1,
   },
+  headerTitle: {
+    ...typography.h2,
+    color: colors.textInverse,
+  },
   headerSubtitle: {
-    fontSize: 14,
-    color: colors.header.text,
-    marginTop: 4,
+    ...typography.bodySmall,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: spacing[2],
   },
   content: {
     flex: 1,
   },
   loadingText: {
+    ...typography.body,
     textAlign: 'center',
-    marginTop: 50,
-    fontSize: 16,
+    marginTop: spacing[64],
     color: colors.textMuted,
   },
   section: {
     backgroundColor: colors.card,
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary.main,
+    marginHorizontal: spacing[16],
+    marginTop: spacing[16],
+    borderRadius: borderRadius.lg,
+    padding: spacing[20],
+    ...shadows.md,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  sectionIcon: {
-    fontSize: 24,
-    marginRight: 12,
-    color: colors.primary.main,
+  sectionIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing[12],
   },
   sectionHeaderText: {
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    ...typography.h4,
     color: colors.text,
   },
   sectionDescription: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textMuted,
-    marginTop: 2,
+    marginTop: spacing[2],
   },
-  tabHint: {
-    fontSize: 12,
+  actionCard: {
+    marginTop: spacing[16],
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  actionCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing[16],
+  },
+  actionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing[12],
+  },
+  actionTextContent: {
+    flex: 1,
+  },
+  actionTitle: {
+    ...typography.label,
+    color: colors.text,
+  },
+  actionSubtitle: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing[2],
+  },
+  hintContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing[12],
+    gap: spacing[6],
+  },
+  hintText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+  },
+  emptyState: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing[24],
+    alignItems: 'center',
+    marginTop: spacing[12],
+  },
+  emptyIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundTertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[12],
+  },
+  emptyText: {
+    ...typography.bodySmall,
     color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 12,
-    fontStyle: 'italic',
+    lineHeight: 20,
   },
   card: {
     backgroundColor: colors.card,
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    marginHorizontal: spacing[16],
+    marginTop: spacing[12],
+    borderRadius: borderRadius.lg,
+    padding: spacing[20],
+    ...shadows.sm,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+    marginBottom: spacing[4],
   },
   cardTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.text,
-    marginBottom: 4,
   },
   cardDescription: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textMuted,
-    marginBottom: 12,
-  },
-  rowCard: {
-    backgroundColor: colors.card,
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  rowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rowIcon: {
-    fontSize: 20,
-    marginRight: 12,
-    color: colors.primary.main,
-  },
-  rowTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text,
-  },
-  optionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  optionButton: {
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    minWidth: 70,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  optionButtonActive: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#4CAF50',
-  },
-  optionIcon: {
-    fontSize: 16,
-    marginBottom: 2,
-  },
-  optionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-  },
-  optionLabelActive: {
-    color: '#fff',
-  },
-  daysGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 6,
-  },
-  dayButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  dayButtonActive: {
-    backgroundColor: '#FF9800',
-    borderColor: '#FF9800',
-  },
-  dayButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
-  dayButtonTextActive: {
-    color: '#fff',
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  calendarHeaderText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#999',
-    width: 40,
-    textAlign: 'center',
+    marginBottom: spacing[16],
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-  },
-  calendarEmpty: {
-    width: 40,
-    height: 36,
-    margin: 2,
+    gap: spacing[4],
   },
   calendarDay: {
-    width: 40,
+    width: 36,
     height: 36,
-    margin: 2,
-    borderRadius: 18,
-    backgroundColor: '#f5f5f5',
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   calendarDayActive: {
-    backgroundColor: '#FF9800',
+    backgroundColor: colors.warning,
   },
   calendarDayText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
-  calendarDayTextActive: {
-    color: '#fff',
+    ...typography.captionMedium,
+    color: colors.textSecondary,
   },
   selectedDaysInfo: {
-    marginTop: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff3e0',
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing[12],
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[12],
+    backgroundColor: colors.warningLight,
+    borderRadius: borderRadius.sm,
+    gap: spacing[6],
   },
   selectedDaysText: {
-    fontSize: 13,
-    color: '#e65100',
-    fontWeight: '500',
-    textAlign: 'center',
+    ...typography.captionMedium,
+    color: colors.warning,
+    flex: 1,
   },
   hourSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginVertical: spacing[16],
   },
   hourButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#f5f5f5',
+    width: 48,
+    height: 48,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  hourButtonText: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
-  },
   hourDisplay: {
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing[24],
     alignItems: 'center',
   },
   hourText: {
+    ...typography.h1,
+    color: colors.primary.main,
     fontSize: 36,
-    fontWeight: 'bold',
-    color: '#FF9800',
-  },
-  hourPeriod: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  quickHours: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  quickHourButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: '#f5f5f5',
-  },
-  quickHourButtonActive: {
-    backgroundColor: '#FF9800',
-  },
-  quickHourText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
-  quickHourTextActive: {
-    color: '#fff',
   },
   minuteLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 6,
+    marginBottom: spacing[8],
   },
   minuteGrid: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing[8],
   },
   minuteButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[16],
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.backgroundSecondary,
     minWidth: 50,
     alignItems: 'center',
   },
   minuteButtonActive: {
-    backgroundColor: '#FF9800',
+    backgroundColor: colors.primary.main,
   },
   minuteButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
+    ...typography.label,
+    color: colors.textSecondary,
   },
   minuteButtonTextActive: {
-    color: '#fff',
+    color: colors.common.white,
   },
   infoCard: {
-    backgroundColor: '#e3f2fd',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: colors.primary.light,
+    marginHorizontal: spacing[16],
+    marginTop: spacing[12],
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
     flexDirection: 'row',
     alignItems: 'flex-start',
-  },
-  infoIcon: {
-    fontSize: 18,
-    marginRight: 10,
+    gap: spacing[10],
   },
   infoContent: {
     flex: 1,
   },
   infoTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1565C0',
-    marginBottom: 2,
+    ...typography.label,
+    color: colors.primary.main,
+    marginBottom: spacing[2],
   },
   infoText: {
-    fontSize: 13,
-    color: '#1565C0',
+    ...typography.caption,
+    color: colors.primary.dark,
     lineHeight: 18,
   },
   disabledCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    padding: 24,
+    backgroundColor: colors.card,
+    marginHorizontal: spacing[16],
+    marginTop: spacing[12],
+    borderRadius: borderRadius.lg,
+    padding: spacing[24],
     alignItems: 'center',
+    ...shadows.sm,
   },
-  disabledIcon: {
-    fontSize: 40,
-    marginBottom: 8,
+  disabledIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[12],
   },
   disabledTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
+    ...typography.bodyMedium,
+    color: colors.text,
+    marginBottom: spacing[6],
+    textAlign: 'center',
   },
   disabledText: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
   divider: {
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    marginVertical: 8,
+    height: spacing[8],
+    backgroundColor: colors.backgroundSecondary,
+    marginVertical: spacing[8],
   },
-  utilityButton: {
-    marginBottom: 12,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 2,
+  groupCodeCard: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing[20],
+    alignItems: 'center',
+    marginTop: spacing[16],
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  utilityButtonGradient: {
+  groupCodeLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: spacing[4],
+  },
+  groupCodeValue: {
+    ...typography.h1,
+    color: colors.primary.main,
+    letterSpacing: 2,
+    fontSize: 24,
+  },
+  groupNameText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing[6],
+  },
+  leaveGroupButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    justifyContent: 'center',
+    backgroundColor: colors.errorLight,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing[14],
+    paddingHorizontal: spacing[20],
+    marginTop: spacing[16],
+    gap: spacing[8],
+    borderWidth: 1,
+    borderColor: colors.error,
   },
-  utilityButtonIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  utilityButtonContent: {
-    flex: 1,
-  },
-  utilityButtonTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  utilityButtonSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
-  },
-  utilityButtonArrow: {
-    fontSize: 24,
-    color: '#fff',
-  },
-  financeButton: {
-    marginBottom: 12,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 2,
-  },
-  financeButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-  },
-  financeButtonIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  financeButtonContent: {
-    flex: 1,
-  },
-  financeButtonTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  financeButtonSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
-  },
-  financeButtonArrow: {
-    fontSize: 24,
-    color: '#fff',
+  leaveGroupButtonText: {
+    ...typography.buttonSmall,
+    color: colors.error,
   },
   premiumButton: {
-    marginBottom: 12,
-    borderRadius: 12,
+    marginTop: spacing[16],
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    elevation: 3,
+    backgroundColor: colors.warning,
+    ...shadows.colored(colors.warning),
   },
-  premiumButtonGradient: {
+  premiumButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: spacing[16],
+    gap: spacing[12],
   },
-  premiumButtonIcon: {
-    fontSize: 28,
-    marginRight: 12,
+  premiumButtonIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  premiumButtonContent: {
+  premiumButtonTextContent: {
     flex: 1,
   },
   premiumButtonTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#fff',
+    ...typography.button,
+    color: colors.common.white,
   },
   premiumButtonSubtitle: {
-    fontSize: 13,
+    ...typography.caption,
     color: 'rgba(255,255,255,0.9)',
-    marginTop: 2,
-  },
-  premiumButtonArrow: {
-    fontSize: 24,
-    color: '#fff',
+    marginTop: spacing[2],
   },
   premiumFeatures: {
-    backgroundColor: '#fff8e1',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: colors.warningLight,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    marginTop: spacing[12],
   },
   premiumFeaturesTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#e65100',
-    marginBottom: 10,
+    ...typography.label,
+    color: colors.warning,
+    marginBottom: spacing[12],
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing[10],
+    gap: spacing[10],
   },
-  featureIcon: {
-    fontSize: 16,
-    marginRight: 10,
+  featureDot: {
+    width: 20,
+    height: 20,
+    borderRadius: borderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   featureText: {
-    fontSize: 13,
-    color: '#333',
+    ...typography.bodySmall,
+    color: colors.text,
   },
   premiumActiveCard: {
-    backgroundColor: '#e8f5e9',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.successLight,
+    borderRadius: borderRadius.lg,
+    padding: spacing[20],
     alignItems: 'center',
+    marginTop: spacing[16],
   },
   premiumBadge: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.success,
+    paddingHorizontal: spacing[16],
+    paddingVertical: spacing[8],
+    borderRadius: borderRadius.full,
+    marginBottom: spacing[12],
+    gap: spacing[6],
   },
   premiumBadgeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
+    ...typography.captionMedium,
+    color: colors.common.white,
   },
   premiumActiveText: {
-    fontSize: 14,
-    color: '#333',
+    ...typography.bodySmall,
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: spacing[12],
+    lineHeight: 20,
   },
   restoreButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[16],
   },
   restoreButtonText: {
-    color: '#666',
-    fontSize: 13,
+    ...typography.captionMedium,
+    color: colors.textMuted,
     textDecorationLine: 'underline',
   },
-  emptyState: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: 10,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  simulatorCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 15,
-    marginTop: 10,
-  },
-  simulatorRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  simulatorLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  simulatorValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  percentageLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 15,
-    marginBottom: 10,
-  },
-  percentageOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  percentageButton: {
-    flex: 1,
-    marginHorizontal: 4,
-    paddingVertical: 12,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  percentageButtonActive: {
-    backgroundColor: '#1565C0',
-    borderColor: '#1565C0',
-  },
-  percentageButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  percentageButtonTextActive: {
-    color: '#fff',
-  },
-  resultCard: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 15,
-    alignItems: 'center',
-  },
-  resultTitle: {
-    fontSize: 14,
-    color: '#1565C0',
-    marginBottom: 8,
-  },
-  resultValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#1565C0',
-    marginBottom: 5,
-  },
-  resultDate: {
-    fontSize: 16,
-    color: '#1565C0',
-    fontWeight: '600',
-  },
-  resultSubtext: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  resultWarning: {
-    fontSize: 13,
-    color: '#E53935',
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 20,
+  bottomSpacer: {
+    height: spacing[24],
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#1565C0',
+    padding: spacing[16],
+    backgroundColor: colors.primary.main,
+  },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+    ...typography.h3,
+    color: colors.common.white,
   },
-  modalClose: {
-    fontSize: 24,
-    color: '#fff',
-    padding: 5,
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalContent: {
     flex: 1,
-    padding: 15,
+    padding: spacing[16],
   },
   modalSummaryCard: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 20,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    padding: spacing[20],
+    marginBottom: spacing[20],
+    ...shadows.md,
+  },
+  modalSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+    marginBottom: spacing[12],
   },
   modalSummaryTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1565C0',
-    marginBottom: 10,
+    ...typography.h4,
+    color: colors.primary.main,
+  },
+  modalSummaryDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing[12],
   },
   modalSummaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 5,
+    alignItems: 'center',
+    paddingVertical: spacing[6],
   },
   modalSummaryLabel: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textMuted,
   },
   modalSummaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  modalSectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 15,
-    marginBottom: 10,
-  },
-  modalEmpty: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    padding: 20,
-  },
-  modalMonthCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#eee',
-  },
-  modalMonthHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-  },
-  modalMonthName: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  modalMonthDebt: {
-    fontSize: 13,
-    color: '#FF9800',
-    fontWeight: '600',
-  },
-  modalDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 3,
-  },
-  modalDetailLabel: {
-    fontSize: 13,
-    color: '#666',
-  },
-  modalDetailValue: {
-    fontSize: 13,
-    color: '#333',
-  },
-  modalDetailLabelBold: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  modalDetailValueBold: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  modalDebtInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  modalDebtTitle: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-  },
-  modalDebtItem: {
-    fontSize: 12,
-    color: '#FF9800',
+    ...typography.bodyMedium,
+    color: colors.text,
   },
   modalSimulatorSection: {
-    marginTop: 20,
-    paddingTop: 20,
+    marginTop: spacing[20],
+    paddingTop: spacing[20],
     borderTopWidth: 2,
-    borderTopColor: '#1565C0',
+    borderTopColor: colors.primary.light,
   },
-  modalPercentageLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 10,
-  },
-  modalResultCard: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 15,
+  modalSimulatorHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[8],
+    marginBottom: spacing[16],
   },
-  modalResultValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#43A047',
-    marginBottom: 5,
-  },
-  modalResultDate: {
-    fontSize: 16,
-    color: '#43A047',
-    marginBottom: 5,
-  },
-  modalResultSubtext: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
-  },
-  modalResultSuccess: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#43A047',
-    textAlign: 'center',
-  },
-  modalResultWarning: {
-    fontSize: 14,
-    color: '#E53935',
-    textAlign: 'center',
+  modalSectionTitle: {
+    ...typography.h4,
+    color: colors.text,
   },
   modalInputSection: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 15,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    marginTop: spacing[16],
   },
   modalInputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
+    ...typography.label,
+    color: colors.text,
+    marginBottom: spacing[12],
   },
   modalInputLabelSmall: {
-    fontSize: 13,
-    color: '#666',
+    ...typography.caption,
+    color: colors.textMuted,
     flex: 1,
   },
   modalInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing[8],
+    gap: spacing[8],
   },
   modalInput: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: colors.border,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[10],
     fontSize: 16,
     textAlign: 'right',
     minHeight: 44,
-    color: '#000',
+    color: colors.text,
   },
   modalAvailableCard: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 10,
-    padding: 15,
-    marginTop: 15,
+    backgroundColor: colors.primary.light,
+    borderRadius: borderRadius.md,
+    padding: spacing[20],
+    marginTop: spacing[16],
     alignItems: 'center',
   },
   modalAvailableLabel: {
-    fontSize: 14,
-    color: '#1565C0',
-    marginBottom: 5,
+    ...typography.bodySmall,
+    color: colors.primary.main,
+    marginBottom: spacing[4],
   },
   modalAvailableValue: {
+    ...typography.currency,
     fontSize: 24,
-    fontWeight: 'bold',
   },
   modalWarningText: {
-    fontSize: 12,
-    color: '#E53935',
-    marginTop: 5,
+    ...typography.caption,
+    color: colors.error,
+    marginTop: spacing[4],
+  },
+  warningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+    marginTop: spacing[4],
   },
   modalHintText: {
-    fontSize: 12,
-    color: '#999',
+    ...typography.caption,
+    color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: spacing[4],
+  },
+  modalResultCard: {
+    backgroundColor: colors.successLight,
+    borderRadius: borderRadius.lg,
+    padding: spacing[24],
+    marginTop: spacing[16],
+    alignItems: 'center',
+  },
+  resultSuccessIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.successLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[12],
+    borderWidth: 2,
+    borderColor: colors.success,
+  },
+  resultWarningContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[8],
+  },
+  modalResultValue: {
+    ...typography.h3,
+    color: colors.success,
+    textAlign: 'center',
+    marginBottom: spacing[4],
+  },
+  modalResultDate: {
+    ...typography.bodyMedium,
+    color: colors.success,
+    marginBottom: spacing[8],
+  },
+  modalResultSubtext: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  modalResultSuccess: {
+    ...typography.h4,
+    color: colors.success,
+    textAlign: 'center',
+  },
+  modalResultWarning: {
+    ...typography.bodySmall,
+    color: colors.error,
+    textAlign: 'center',
+    lineHeight: 20,
+    flex: 1,
+  },
+  modalSpacer: {
+    height: 32,
   },
   debtItemCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.sm,
+    padding: spacing[12],
+    marginBottom: spacing[8],
     borderWidth: 1,
-    borderColor: '#FF9800',
+    borderColor: colors.warning,
+  },
+  debtItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing[6],
   },
   debtItemTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FF9800',
-    marginBottom: 5,
+    ...typography.label,
+    color: colors.warning,
+  },
+  currentBadge: {
+    backgroundColor: colors.warningLight,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+  },
+  currentBadgeText: {
+    ...typography.captionMedium,
+    color: colors.warning,
   },
   debtItemRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 2,
+    alignItems: 'center',
+    paddingVertical: spacing[3],
+    gap: spacing[6],
+  },
+  debtItemDot: {
+    width: 4,
+    height: 4,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.warning,
   },
   debtItemName: {
-    fontSize: 13,
-    color: '#666',
+    ...typography.caption,
+    color: colors.textSecondary,
+    flex: 1,
   },
   debtItemAmount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
+    ...typography.captionMedium,
+    color: colors.text,
+  },
+  modalSuccessIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.successLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[12],
   },
   modalSuccessTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#43A047',
+    ...typography.h2,
+    color: colors.success,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: spacing[8],
   },
   modalSuccessText: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
-  },
-  modalSpacer: {
-    height: 30,
-  },
-  groupCodeCard: {
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  groupCodeLabel: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginBottom: 4,
-  },
-  groupCodeValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-    letterSpacing: 3,
-  },
-  groupNameText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 6,
-  },
-  leaveGroupButton: {
-    backgroundColor: '#ffebee',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    marginTop: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ef5350',
-  },
-  leaveGroupButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#c62828',
-  },
-  bottomSpacer: {
-    height: 20,
   },
 });
 

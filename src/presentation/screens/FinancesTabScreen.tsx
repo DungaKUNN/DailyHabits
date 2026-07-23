@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Dimensions, StatusBar } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../theme/colors';
+import { Wallet, Plus, CurrencyDollar, Trash, CaretRight } from 'phosphor-react-native';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod } from '../../domain/entities/Finance';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 const { width } = Dimensions.get('window');
 
 const LOG_PREFIX = '[FinancesTabScreen]';
@@ -19,6 +22,8 @@ const FinancesTabScreen: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showYearModal, setShowYearModal] = useState(false);
   const [showMonthModal, setShowMonthModal] = useState(false);
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FinancePeriod | null>(null);
 
   useEffect(() => {
     loadFinanceData();
@@ -49,27 +54,22 @@ const FinancesTabScreen: React.FC = () => {
   };
 
   const deletePeriod = async (period: FinancePeriod) => {
-    Alert.alert(
-      'Eliminar período',
-      `¿Estás seguro de eliminar ${period.monthName} ${period.year}? Se borrarán todos los ingresos, gastos y deudas registrados.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const repo = new SQLiteFinanceRepository(getDatabase());
-              await repo.deletePeriod(period.id);
-              await loadFinanceData();
-            } catch (error) {
-              console.error('Error deleting period:', error);
-              Alert.alert('Error', 'No se pudo eliminar el período');
-            }
-          },
-        },
-      ]
-    );
+    setDeleteTarget(period);
+    setDeleteDialogVisible(true);
+  };
+
+  const confirmDeletePeriod = async () => {
+    if (!deleteTarget) return;
+    try {
+      const repo = new SQLiteFinanceRepository(getDatabase());
+      await repo.deletePeriod(deleteTarget.id);
+      await loadFinanceData();
+    } catch (error) {
+      console.error('Error deleting period:', error);
+      Alert.alert('Error', 'No se pudo eliminar el período');
+    }
+    setDeleteDialogVisible(false);
+    setDeleteTarget(null);
   };
 
   const createPeriod = async (year: number, month: number) => {
@@ -169,101 +169,133 @@ const FinancesTabScreen: React.FC = () => {
     return monthB - monthA;
   });
 
-  const PeriodCard: React.FC<{ period: FinancePeriod }> = ({ period }) => {
+  const PeriodCard = React.memo<{ period: FinancePeriod }>(({ period }) => {
     const { totalIncome, totalExpenses, totalDebts } = getTotals(period);
+    const balance = totalIncome - totalExpenses - totalDebts;
+    const isPositive = balance >= 0;
     
     return (
       <TouchableOpacity
         style={styles.periodCard}
         onPress={() => navigation.navigate('FinanceDetail', { periodId: period.id })}
         onLongPress={() => deletePeriod(period)}
+        activeOpacity={0.7}
       >
-        <LinearGradient colors={['#ffffff', '#f8f9fa']} style={styles.periodCardGradient}>
+        <View style={styles.periodCardContent}>
           <View style={styles.periodHeader}>
-            <Text style={styles.periodMonth}>{period.monthName} {period.year}</Text>
-            <Text style={styles.periodTotal}>
-              {formatCurrency(totalIncome - totalExpenses - totalDebts)}
-            </Text>
+            <View style={styles.periodHeaderLeft}>
+              <View style={styles.periodIconContainer}>
+                <Wallet size={24} color={colors.primary.main} weight="fill" />
+              </View>
+              <View>
+                <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName}</Text>
+                <Text style={styles.periodYear}>{period.year}</Text>
+              </View>
+            </View>
+            <View style={styles.periodHeaderRight}>
+              <Text style={[styles.periodBalance, isPositive ? styles.balancePositive : styles.balanceNegative]} numberOfLines={1}>
+                {isPositive ? '+' : ''}{formatCurrency(balance)}
+              </Text>
+              <CaretRight size={16} color={colors.textMuted} weight="bold" />
+            </View>
           </View>
+          
+          <View style={styles.periodDivider} />
           
           <View style={styles.periodDetails}>
             <View style={styles.periodDetail}>
-              <Text style={styles.periodDetailIcon}>💵</Text>
-              <View>
+              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.green }]} />
+              <View style={styles.periodDetailContent}>
                 <Text style={styles.periodDetailLabel}>Ingresos</Text>
-                <Text style={styles.periodDetailValue}>
-                  {period.income.length} registros • {formatCurrency(totalIncome)}
-                </Text>
+                <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalIncome)}</Text>
               </View>
+              <Text style={styles.periodDetailCount}>{period.income.length}</Text>
             </View>
             
             <View style={styles.periodDetail}>
-              <Text style={styles.periodDetailIcon}>📝</Text>
-              <View>
+              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.red }]} />
+              <View style={styles.periodDetailContent}>
                 <Text style={styles.periodDetailLabel}>Gastos</Text>
-                <Text style={styles.periodDetailValue}>
-                  {formatCurrency(totalExpenses)}
-                </Text>
+                <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalExpenses)}</Text>
               </View>
+              <Text style={styles.periodDetailCount}>{period.expenses.length}</Text>
             </View>
 
             <View style={styles.periodDetail}>
-              <Text style={styles.periodDetailIcon}>🏦</Text>
-              <View>
+              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.orange }]} />
+              <View style={styles.periodDetailContent}>
                 <Text style={styles.periodDetailLabel}>Deudas</Text>
-                <Text style={styles.periodDetailValue}>
+                <Text style={styles.periodDetailValue} numberOfLines={1}>
                   {totalDebts > 0 ? formatCurrency(totalDebts) : 'Sin deudas'}
                 </Text>
               </View>
+              <Text style={styles.periodDetailCount}>
+                {period.debts.filter(d => !d.paidThisMonth).length}
+              </Text>
             </View>
           </View>
 
-          <Text style={styles.tapHint}>Toca para editar • Mantén presionado para eliminar</Text>
-        </LinearGradient>
+          <View style={styles.periodFooter}>
+            <Text style={styles.tapHint}>Mantén presionado para eliminar</Text>
+            <Trash size={14} color={colors.textMuted} weight="light" />
+          </View>
+        </View>
       </TouchableOpacity>
     );
-  };
+  });
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.headerTitle}>💰 Finanzas</Text>
-            <Text style={styles.headerSubtitle}>Ingresos, Gastos y Deudas</Text>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
+      <LinearGradient colors={[colors.primary.dark, colors.primary.main]} style={styles.header}>
+        <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+          <View style={styles.headerTop}>
+            <Wallet size={24} color={colors.common.white} weight="fill" />
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Finanzas</Text>
+              <Text style={styles.headerSubtitle}>Ingresos, gastos y deudas</Text>
+            </View>
           </View>
-        </View>
-        
-        <View style={styles.yearSelector}>
-          <TouchableOpacity 
-            style={styles.yearButton} 
-            onPress={() => setSelectedYear(Math.max(currentYear - 4, selectedYear - 1))}
-            disabled={selectedYear <= currentYear - 4}
-          >
-            <Text style={[styles.yearButtonText, selectedYear <= currentYear - 4 && styles.yearButtonDisabled]}>‹</Text>
-          </TouchableOpacity>
-          <Text style={styles.yearText}>{selectedYear}</Text>
-          <TouchableOpacity 
-            style={styles.yearButton}
-            onPress={() => setSelectedYear(Math.min(currentYear, selectedYear + 1))}
-            disabled={selectedYear >= currentYear}
-          >
-            <Text style={[styles.yearButtonText, selectedYear >= currentYear && styles.yearButtonDisabled]}>›</Text>
-          </TouchableOpacity>
-        </View>
+        </SafeAreaView>
       </LinearGradient>
 
+      <View style={styles.yearSelector}>
+        <TouchableOpacity 
+          style={[styles.yearButton, selectedYear <= currentYear - 4 && styles.yearButtonDisabled]} 
+          onPress={() => setSelectedYear(Math.max(currentYear - 4, selectedYear - 1))}
+          disabled={selectedYear <= currentYear - 4}
+        >
+          <CaretRight size={18} color={selectedYear <= currentYear - 4 ? colors.textMuted : colors.primary.main} weight="bold" style={{ transform: [{ rotate: '180deg' }] }} />
+        </TouchableOpacity>
+        
+        <View style={styles.yearBadge}>
+          <Text style={styles.yearText}>{selectedYear}</Text>
+        </View>
+        
+        <TouchableOpacity 
+          style={[styles.yearButton, selectedYear >= currentYear && styles.yearButtonDisabled]}
+          onPress={() => setSelectedYear(Math.min(currentYear, selectedYear + 1))}
+          disabled={selectedYear >= currentYear}
+        >
+          <CaretRight size={18} color={selectedYear >= currentYear ? colors.textMuted : colors.primary.main} weight="bold" />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity style={styles.addButton} onPress={() => setShowMonthModal(true)}>
-          <LinearGradient colors={['#4CAF50', '#388E3C']} style={styles.addButtonGradient}>
-            <Text style={styles.addButtonIcon}>+</Text>
+        <TouchableOpacity style={styles.addButton} onPress={() => setShowMonthModal(true)} activeOpacity={0.7}>
+          <View style={styles.addButtonContent}>
+            <View style={styles.addButtonIconContainer}>
+              <Plus size={20} color={colors.common.white} weight="bold" />
+            </View>
             <Text style={styles.addButtonText}>Nuevo período</Text>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
 
         {sortedPeriods.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>💰</Text>
+            <View style={styles.emptyIconContainer}>
+              <Wallet size={48} color={colors.textMuted} weight="light" />
+            </View>
             <Text style={styles.emptyTitle}>Sin registros en {selectedYear}</Text>
             <Text style={styles.emptyText}>Toca "Nuevo período" para comenzar a registrar</Text>
           </View>
@@ -272,13 +304,22 @@ const FinancesTabScreen: React.FC = () => {
             <PeriodCard key={period.id} period={period} />
           ))
         )}
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
 
       <Modal visible={showMonthModal} transparent animationType="fade" onRequestClose={() => setShowMonthModal(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowMonthModal(false)}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Crear nuevo período</Text>
-            <Text style={styles.modalSubtitle}>Selecciona el mes</Text>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalIconContainer}>
+                <CurrencyDollar size={24} color={colors.primary.main} weight="bold" />
+              </View>
+              <View>
+                <Text style={styles.modalTitle}>Crear período</Text>
+                <Text style={styles.modalSubtitle}>Selecciona el mes para {selectedYear}</Text>
+              </View>
+            </View>
             
             <ScrollView style={styles.monthScroll} showsVerticalScrollIndicator={false}>
               {MONTHS.map((monthName, index) => (
@@ -286,20 +327,29 @@ const FinancesTabScreen: React.FC = () => {
                   key={index}
                   style={styles.monthButton}
                   onPress={() => createPeriod(selectedYear, index)}
+                  activeOpacity={0.7}
                 >
                   <Text style={styles.monthButtonText}>{monthName}</Text>
+                  <CaretRight size={16} color={colors.textMuted} weight="bold" />
                 </TouchableOpacity>
               ))}
             </ScrollView>
             
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelButton} onPress={() => setShowMonthModal(false)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.modalCancelButton} onPress={() => setShowMonthModal(false)} activeOpacity={0.7}>
+              <Text style={styles.modalCancelText}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmDialog
+        visible={deleteDialogVisible}
+        title="Eliminar período"
+        message={deleteTarget ? `¿Estás seguro de eliminar ${deleteTarget.monthName} ${deleteTarget.year}? Se borrarán todos los ingresos, gastos y deudas registrados.` : ''}
+        confirmText="Eliminar"
+        onConfirm={confirmDeletePeriod}
+        onCancel={() => { setDeleteDialogVisible(false); setDeleteTarget(null); }}
+      />
     </View>
   );
 };
@@ -310,230 +360,293 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingTop: 50,
-    paddingBottom: 15,
-    paddingHorizontal: 20,
+    paddingBottom: spacing[16],
+  },
+  headerSafeArea: {
+    paddingHorizontal: spacing[16],
+    paddingTop: spacing[6],
   },
   headerTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: spacing[10],
+  },
+  headerTextContainer: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.common.white,
   },
   headerSubtitle: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.common.white,
-    opacity: 0.9,
-    marginTop: 2,
+    opacity: 0.85,
+    marginTop: spacing[2],
   },
   yearSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
-    gap: 20,
+    backgroundColor: colors.card,
+    marginHorizontal: spacing[12],
+    marginTop: -spacing[8],
+    borderRadius: borderRadius.md,
+    padding: spacing[2],
+    ...shadows.md,
+    gap: spacing[16],
   },
   yearButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  yearButtonText: {
-    fontSize: 24,
-    color: colors.common.white,
-    fontWeight: 'bold',
-  },
   yearButtonDisabled: {
-    opacity: 0.3,
+    opacity: 0.4,
+  },
+  yearBadge: {
+    backgroundColor: colors.primary.main,
+    paddingHorizontal: spacing[20],
+    paddingVertical: spacing[8],
+    borderRadius: borderRadius.full,
   },
   yearText: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.common.white,
   },
   scrollView: {
     flex: 1,
   },
   addButton: {
-    margin: 16,
-    marginTop: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[16],
+    backgroundColor: colors.primary.main,
+    borderRadius: borderRadius.lg,
+    ...shadows.primary,
   },
-  addButtonGradient: {
+  addButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 8,
+    paddingVertical: spacing[16],
+    gap: spacing[8],
   },
-  addButtonIcon: {
-    fontSize: 24,
-    color: colors.common.white,
-    fontWeight: 'bold',
-  },
-  addButtonText: {
-    fontSize: 16,
-    color: colors.common.white,
-    fontWeight: '600',
-  },
-  loadingContainer: {
+  addButtonIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
   },
-  loadingText: {
-    fontSize: 16,
-    color: colors.textMuted,
+  addButtonText: {
+    ...typography.button,
+    color: colors.common.white,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    paddingVertical: spacing[64],
+    paddingHorizontal: spacing[8],
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[20],
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: spacing[8],
+    textAlign: 'center',
   },
   emptyText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.textMuted,
     textAlign: 'center',
-    lineHeight: 20,
   },
   periodCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 20,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[12],
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    ...shadows.md,
   },
-  periodCardGradient: {
-    padding: 20,
+  periodCardContent: {
+    padding: spacing[20],
   },
   periodHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+  },
+  periodHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    flex: 1,
+  },
+  periodIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary.light,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   periodMonth: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h4,
     color: colors.text,
   },
-  periodTotal: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.primary.main,
+  periodYear: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  periodHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  periodBalance: {
+    ...typography.currency,
+  },
+  balancePositive: {
+    color: colors.accent.green,
+  },
+  balanceNegative: {
+    color: colors.accent.red,
+  },
+  periodDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginVertical: spacing[16],
   },
   periodDetails: {
-    gap: 14,
-    marginBottom: 8,
+    gap: spacing[12],
   },
   periodDetail: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[10],
   },
-  periodDetailIcon: {
-    fontSize: 22,
-    marginRight: 12,
+  periodDetailDot: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
+  },
+  periodDetailContent: {
+    flex: 1,
   },
   periodDetailLabel: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontWeight: '500',
+    ...typography.captionMedium,
+    color: colors.textSecondary,
   },
   periodDetailValue: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.text,
     fontWeight: '600',
+    marginTop: 1,
+  },
+  periodDetailCount: {
+    ...typography.caption,
+    color: colors.textMuted,
+    backgroundColor: colors.backgroundSecondary,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  periodFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing[16],
+    paddingTop: spacing[12],
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+    gap: spacing[4],
   },
   tapHint: {
-    fontSize: 11,
+    ...typography.caption,
     color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: 12,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: spacing[24],
   },
   modalContent: {
     backgroundColor: colors.common.white,
-    borderRadius: 20,
-    padding: 24,
-    width: '85%',
-    maxWidth: 340,
+    borderRadius: borderRadius.xl,
+    padding: spacing[24],
+    width: '100%',
+    maxWidth: 360,
+    maxHeight: '80%',
+    ...shadows.xl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    marginBottom: spacing[20],
+  },
+  modalIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary.light,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 8,
+    ...typography.h3,
+    color: colors.text,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 16,
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   monthScroll: {
-    maxHeight: 300,
+    maxHeight: 320,
   },
   monthButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 8,
-    backgroundColor: '#f5f5f5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[14],
+    paddingHorizontal: spacing[16],
+    borderRadius: borderRadius.md,
+    marginBottom: spacing[8],
+    backgroundColor: colors.backgroundSecondary,
   },
   monthButtonText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
+    ...typography.bodyMedium,
+    color: colors.text,
   },
   modalCancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#f0f0f0',
+    paddingVertical: spacing[14],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundTertiary,
     alignItems: 'center',
+    marginTop: spacing[12],
   },
   modalCancelText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
+    ...typography.button,
+    color: colors.textSecondary,
+  },
+  bottomSpacer: {
+    height: spacing[24],
   },
 });
 

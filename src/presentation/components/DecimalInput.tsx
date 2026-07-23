@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TextInput, StyleSheet, TextInputProps, View, TouchableOpacity, Text } from 'react-native';
+import { colors, spacing, borderRadius } from '../theme/colors';
+import { typography } from '../theme/typography';
 
 interface DecimalInputProps extends Omit<TextInputProps, 'value' | 'onChangeText'> {
   value: string;
@@ -8,13 +10,13 @@ interface DecimalInputProps extends Omit<TextInputProps, 'value' | 'onChangeText
   autoFormat?: boolean;
 }
 
-export const DecimalInput: React.FC<DecimalInputProps> = ({ 
-  value, 
-  onChangeText, 
+export const DecimalInput: React.FC<DecimalInputProps> = ({
+  value,
+  onChangeText,
   style,
   showDotButton = true,
   autoFormat = false,
-  ...props 
+  ...props
 }) => {
   const inputRef = useRef<TextInput>(null);
   const [displayValue, setDisplayValue] = useState(value);
@@ -29,14 +31,14 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
   const formatAsCurrency = (text: string): string => {
     const cleaned = text.replace(/[^0-9]/g, '');
     if (cleaned === '') return '';
-    
+
     const num = parseInt(cleaned, 10);
     if (isNaN(num)) return '';
-    
+
     if (cleaned.length <= 2) {
       return num.toString();
     }
-    
+
     const pesos = cleaned.slice(0, -2);
     const centavos = cleaned.slice(-2);
     return `${pesos}.${centavos}`;
@@ -44,17 +46,17 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
 
   const handleChange = (text: string) => {
     let cleaned = text.replace(/[^0-9.]/g, '');
-    
+
     const parts = cleaned.split('.');
     if (parts.length > 2) {
       cleaned = parts[0] + '.' + parts.slice(1).join('');
     }
-    
+
     const decimalParts = cleaned.split('.');
     if (decimalParts.length === 2 && decimalParts[1].length > 2) {
       cleaned = decimalParts[0] + '.' + decimalParts[1].slice(0, 2);
     }
-    
+
     if (autoFormat && isFocused) {
       const formatted = formatAsCurrency(cleaned);
       setDisplayValue(formatted);
@@ -101,30 +103,34 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
         onFocus={() => setIsFocused(true)}
         keyboardType="numeric"
         selectTextOnFocus
+        placeholderTextColor={colors.input.placeholder}
         {...props}
       />
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isFocused && styles.containerFocused]}>
       <TextInput
         ref={inputRef}
-        style={[styles.input, isFocused && styles.inputFocused, style]}
+        style={[styles.input, style]}
         value={displayValue}
         onChangeText={handleChange}
         onBlur={handleBlur}
         onFocus={() => setIsFocused(true)}
         keyboardType="numeric"
         selectTextOnFocus
+        placeholderTextColor={colors.input.placeholder}
         {...props}
       />
-      <TouchableOpacity 
-        style={[styles.dotButton, displayValue.includes('.') && styles.dotButtonDisabled]} 
+      <TouchableOpacity
+        style={[styles.dotButton, displayValue.includes('.') && styles.dotButtonDisabled]}
         onPress={insertDecimal}
         disabled={displayValue.includes('.')}
       >
-        <Text style={[styles.dotButtonText, displayValue.includes('.') && styles.dotButtonTextDisabled]}>.</Text>
+        <Text style={[styles.dotButtonText, displayValue.includes('.') && styles.dotButtonTextDisabled]}>
+          .
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -134,50 +140,55 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.sm,
     overflow: 'hidden',
     maxWidth: 150,
+    borderWidth: 1.5,
+    borderColor: colors.input.border,
+  },
+  containerFocused: {
+    backgroundColor: colors.input.backgroundFocused,
+    borderColor: colors.input.borderFocused,
   },
   input: {
     flex: 1,
-    padding: 10,
-    fontSize: 15,
-    color: '#333',
+    padding: spacing[2],
+    ...typography.bodySmall,
+    color: colors.text,
     textAlign: 'center',
     backgroundColor: 'transparent',
     minWidth: 0,
   },
   inputOnly: {
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 15,
-    color: '#333',
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.sm,
+    padding: spacing[2],
+    ...typography.bodySmall,
+    color: colors.text,
     textAlign: 'center',
-  },
-  inputFocused: {
-    backgroundColor: '#e8f4fd',
+    borderWidth: 1.5,
+    borderColor: colors.input.border,
   },
   dotButton: {
-    backgroundColor: '#2196F3',
-    width: 36,
-    height: 36,
+    backgroundColor: colors.primary.main,
+    width: 34,
+    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 4,
-    borderRadius: 6,
+    marginRight: spacing[1],
+    borderRadius: borderRadius.xs,
   },
   dotButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: colors.backgroundTertiary,
   },
   dotButtonText: {
-    color: '#fff',
+    color: colors.common.white,
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
     lineHeight: 22,
   },
   dotButtonTextDisabled: {
-    color: '#999',
+    color: colors.textMuted,
   },
 });

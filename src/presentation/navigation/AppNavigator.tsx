@@ -3,12 +3,18 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Ionicons } from '@expo/vector-icons';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
+import {
+  Lightning,
+  Wallet,
+  ChartBar,
+  User,
+} from 'phosphor-react-native';
 
-import { colors } from '../theme/colors';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import ExpensesScreen from '../screens/ExpensesScreen';
 import FinancesTabScreen from '../screens/FinancesTabScreen';
 import FinanceDetailScreen from '../screens/FinanceDetailScreen';
@@ -39,13 +45,19 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 const LOG_PREFIX = '[AppNavigator]';
 
-const TabIcon = ({ name, focused }: { name: string; focused: boolean }) => (
-  <Ionicons
-    name={name as any}
-    size={24}
-    color={focused ? colors.primary.main : colors.textMuted}
-  />
-);
+const TabIcon = ({ name, focused }: { name: string; focused: boolean }) => {
+  const iconColor = focused ? colors.primary.main : colors.textMuted;
+  const size = 24;
+
+  const icons: Record<string, React.ReactNode> = {
+    gastos: <Lightning size={size} color={iconColor} weight={focused ? 'fill' : 'regular'} />,
+    finanzas: <Wallet size={size} color={iconColor} weight={focused ? 'fill' : 'regular'} />,
+    estadisticas: <ChartBar size={size} color={iconColor} weight={focused ? 'fill' : 'regular'} />,
+    perfil: <User size={size} color={iconColor} weight={focused ? 'fill' : 'regular'} />,
+  };
+
+  return <View>{icons[name]}</View>;
+};
 
 const MainTabs = () => {
   const insets = useSafeAreaInsets();
@@ -55,15 +67,17 @@ const MainTabs = () => {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          ...styles.tabBar,
+          backgroundColor: colors.common.white,
+          borderTopColor: colors.borderLight,
+          borderTopWidth: 1,
+          height: insets.bottom > 0 ? 64 + insets.bottom : 64,
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
-          height: insets.bottom > 0 ? 60 + insets.bottom : 60,
-          backgroundColor: colors.card,
-          borderTopColor: colors.border,
+          paddingTop: 8,
+          ...shadows.lg,
         },
         tabBarActiveTintColor: colors.primary.main,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: styles.tabLabel,
+        tabBarLabelStyle: typography.tabLabel,
       }}
     >
       <Tab.Screen
@@ -71,7 +85,7 @@ const MainTabs = () => {
         component={ExpensesScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'flash' : 'flash-outline'} focused={focused} />
+            <TabIcon name="gastos" focused={focused} />
           ),
         }}
       />
@@ -80,7 +94,7 @@ const MainTabs = () => {
         component={FinancesTabScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'wallet' : 'wallet-outline'} focused={focused} />
+            <TabIcon name="finanzas" focused={focused} />
           ),
         }}
       />
@@ -89,7 +103,7 @@ const MainTabs = () => {
         component={StatisticsScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} focused={focused} />
+            <TabIcon name="estadisticas" focused={focused} />
           ),
         }}
       />
@@ -98,7 +112,7 @@ const MainTabs = () => {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon name={focused ? 'person' : 'person-outline'} focused={focused} />
+            <TabIcon name="perfil" focused={focused} />
           ),
         }}
       />
@@ -108,55 +122,39 @@ const MainTabs = () => {
 
 const RootNavigator = () => {
   const [hasGroup, setHasGroup] = useState<boolean | null>(null);
-  const [fontsLoaded] = useFonts({
-    ...Ionicons.font,
-  });
+  const [fontsLoaded] = useFonts({});
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect - ini`);
     const checkGroup = async () => {
-      console.log(`${LOG_PREFIX} checkGroup - ini`);
       const groupCode = await getSavedGroupCode();
-      console.log(`${LOG_PREFIX} checkGroup - code: ${groupCode}`);
       setHasGroup(!!groupCode);
-      console.log(`${LOG_PREFIX} checkGroup - hasGroup: ${!!groupCode}`);
     };
     checkGroup();
-    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
 
   const handleGroupReady = () => {
-    console.log(`${LOG_PREFIX} handleGroupReady - ini - setting hasGroup=true`);
     setHasGroup(true);
-    console.log(`${LOG_PREFIX} handleGroupReady - fin - navegado a MainTabs`);
   };
 
-  const handleNavigateToExpenseDetail = (periodId: string) => {
-    console.log(`${LOG_PREFIX} navigate - ExpenseDetail - periodId: ${periodId}`);
-    navigation.navigate('ExpenseDetail', { periodId });
-  };
-
-  const handleNavigateToFinanceDetail = (periodId: string) => {
-    console.log(`${LOG_PREFIX} navigate - FinanceDetail - periodId: ${periodId}`);
-    navigation.navigate('FinanceDetail', { periodId });
-  };
-
-  const handleNavigateToFloorsConfig = () => {
-    console.log(`${LOG_PREFIX} navigate - FloorsConfig`);
-    navigation.navigate('FloorsConfig');
-  };
-
-  console.log(`${LOG_PREFIX} RootNavigator - render - hasGroup: ${hasGroup}`);
   if (hasGroup === null) return null;
 
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: colors.header.background },
-        headerTintColor: colors.header.text,
-        headerTitleStyle: { color: colors.header.text },
+        headerStyle: {
+          backgroundColor: colors.common.white,
+          elevation: 0,
+          shadowOpacity: 0,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.borderLight,
+        },
+        headerTintColor: colors.text,
+        headerTitleStyle: {
+          ...typography.h4,
+          color: colors.text,
+        },
       }}
     >
       {!hasGroup ? (
@@ -176,7 +174,7 @@ const RootNavigator = () => {
       <Stack.Screen
         name="ExpenseDetail"
         component={ExpenseDetailScreen}
-        options={{ title: 'Detalle de Gasto' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="FinanceDetail"
@@ -199,22 +197,3 @@ export const AppNavigator = () => {
     </NavigationContainer>
   );
 };
-
-const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.card,
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    height: 60,
-    paddingTop: 8,
-  },
-  tabLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-});

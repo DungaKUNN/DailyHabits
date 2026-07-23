@@ -1,13 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, FlatList, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput, Alert, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../theme/colors';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import {
+  Wallet,
+  Plus,
+  CurrencyDollar,
+  TrendUp,
+  TrendDown,
+  Warning,
+  Check,
+  X,
+  CaretRight,
+  PencilSimple,
+  Trash,
+} from 'phosphor-react-native';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
 import { getDatabase } from '../../data/Database';
 import { FinancePeriod, FinanceIncome, FinanceExpense, FinanceDebt } from '../../domain/entities/Finance';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 const INCOME_SOURCES = ['Salario', 'Freelance', 'Inversión', 'Bono', 'Comisiones', 'Pensión', 'Otro'];
 const EXPENSE_CATEGORIES = ['Alquiler', 'Servicios', 'Comida', 'Transporte', 'Entretenimiento', 'Salud', 'Educación', 'Ropa', 'Otros'];
@@ -39,6 +54,13 @@ export const FinanceDetailScreen: React.FC = () => {
   const [newSavings, setNewSavings] = useState('');
   const [selectedDebtIndex, setSelectedDebtIndex] = useState<number | null>(null);
   const [showDebtPayModal, setShowDebtPayModal] = useState(false);
+  const [deleteItemDialogVisible, setDeleteItemDialogVisible] = useState(false);
+  const [deleteItemData, setDeleteItemData] = useState<{ type: string; name: string; onConfirm: () => void } | null>(null);
+  const [deleteSavingsDialogVisible, setDeleteSavingsDialogVisible] = useState(false);
+  const [feedbackDialogVisible, setFeedbackDialogVisible] = useState(false);
+  const [feedbackData, setFeedbackData] = useState<{ title: string; message: string; variant: 'success' | 'info' | 'action'; confirmText?: string; onConfirm?: () => void } | null>(null);
+  const [payDebtDialogVisible, setPayDebtDialogVisible] = useState(false);
+  const [payDebtData, setPayDebtData] = useState<{ index: number; name: string; monthlyPayment: number; remainingAmount: number } | null>(null);
 
   useEffect(() => {
     console.log(`${LOG_PREFIX} useEffect - ini`);
@@ -101,9 +123,11 @@ export const FinanceDetailScreen: React.FC = () => {
       setSelectedSource('');
       setSelectedCategory('');
       await loadPeriod();
-      Alert.alert('Éxito', 'Agregado correctamente');
+      setFeedbackData({ title: 'Éxito', message: 'Agregado correctamente', variant: 'success' });
+      setFeedbackDialogVisible(true);
     } catch (error) {
-      Alert.alert('Error', 'No se pudo agregar');
+      setFeedbackData({ title: 'Error', message: 'No se pudo agregar', variant: 'info' });
+      setFeedbackDialogVisible(true);
     }
   };
 
@@ -127,9 +151,11 @@ export const FinanceDetailScreen: React.FC = () => {
       setShowSavingsModal(false);
       setNewSavings('');
       await loadPeriod();
-      Alert.alert('Éxito', `Ahorro de S/ ${amount.toFixed(2)} registrado`);
+      setFeedbackData({ title: 'Éxito', message: `Ahorro de ${formatCurrency(amount)} registrado`, variant: 'success' });
+      setFeedbackDialogVisible(true);
     } catch (error) {
-      Alert.alert('Error', 'No se pudo guardar el ahorro');
+      setFeedbackData({ title: 'Error', message: 'No se pudo guardar el ahorro', variant: 'info' });
+      setFeedbackDialogVisible(true);
     }
   };
 
@@ -224,97 +250,75 @@ export const FinanceDetailScreen: React.FC = () => {
       setSelectedDebtType('');
       setDebtMonths('');
       await loadPeriod();
-      Alert.alert('Éxito', `Deuda registrada por ${monthsInput} meses`);
+      setFeedbackData({ title: 'Éxito', message: `Deuda registrada por ${monthsInput} meses`, variant: 'success' });
+      setFeedbackDialogVisible(true);
     } catch (error) {
-      Alert.alert('Error', 'No se pudo agregar');
+      setFeedbackData({ title: 'Error', message: 'No se pudo agregar', variant: 'info' });
+      setFeedbackDialogVisible(true);
     }
   };
 
   const handleDebtPayment = async (index: number) => {
     if (!period) return;
     const debt = period.debts[index];
+    setPayDebtData({ index, name: debt.name, monthlyPayment: debt.monthlyPayment, remainingAmount: debt.remainingAmount });
+    setPayDebtDialogVisible(true);
+  };
+
+  const confirmDebtPayment = async () => {
+    if (!period || !payDebtData) return;
+    const debt = period.debts[payDebtData.index];
     
-    Alert.alert(
-      `Pagar cuota - ${debt.name}`,
-      `¿Ya pagaste la cuota de S/ ${debt.monthlyPayment.toFixed(2)} este mes?\n\nTotal restante: S/ ${debt.remainingAmount.toFixed(2)}`,
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sí, pagué',
-          onPress: async () => {
-            try {
-              const repo = new SQLiteFinanceRepository(getDatabase());
-              const updatedDebts = [...period.debts];
-              const newRemaining = debt.remainingAmount - debt.monthlyPayment;
-              
-              updatedDebts[index] = {
-                ...debt,
-                paidThisMonth: true,
-                remainingAmount: Math.max(0, newRemaining),
-                isPaid: newRemaining <= 0,
-              };
-              
-              await repo.updatePeriod(period.id, { debts: updatedDebts });
-              console.log('======= PAGAR DEUDA =======');
-              console.log(`${LOG_PREFIX} Debt paid in ${period.monthName} ${period.year}: name="${debt.name}", paidAmount=${debt.monthlyPayment}, remaining=${Math.max(0, newRemaining)}, isFullyPaid=${newRemaining <= 0}`);
-              
-              // Sincronizar el pago con otros períodos que tengan la misma deuda
-              const allPeriods = await repo.getAllPeriods();
-              const debtName = debt.name;
-              const debtTotalAmount = debt.totalAmount;
-              
-              // Solo actualizar períodos futuros (posteriores al actual)
-              const currentPeriodDate = new Date(period.year, parseInt(period.month.split('-')[1]) - 1);
-              
-              console.log(`${LOG_PREFIX} Syncing payment to future periods...`);
-              let syncCount = 0;
-              for (const otherPeriod of allPeriods) {
-                if (otherPeriod.id === period.id) continue;
-                
-                const otherPeriodDate = new Date(otherPeriod.year, parseInt(otherPeriod.month.split('-')[1]) - 1);
-                if (otherPeriodDate <= currentPeriodDate) {
-                  console.log(`${LOG_PREFIX}   Skipping ${otherPeriod.monthName} ${otherPeriod.year} (past period)`);
-                  continue;
-                }
-                
-                const otherDebtIndex = otherPeriod.debts.findIndex(d => 
-                  d.name === debtName && d.totalAmount === debtTotalAmount
-                );
-                
-                if (otherDebtIndex >= 0) {
-                  const otherDebt = otherPeriod.debts[otherDebtIndex];
-                  const otherNewRemaining = Math.max(0, otherDebt.remainingAmount - debt.monthlyPayment);
-                  
-                  const updatedOtherDebts = [...otherPeriod.debts];
-                  updatedOtherDebts[otherDebtIndex] = {
-                    ...otherDebt,
-                    remainingAmount: otherNewRemaining,
-                    isPaid: otherNewRemaining <= 0,
-                  };
-                  
-                  await repo.updatePeriod(otherPeriod.id, { debts: updatedOtherDebts });
-                  console.log(`${LOG_PREFIX}   Synced ${otherPeriod.monthName} ${otherPeriod.year}: remainingAmount ${otherDebt.remainingAmount} -> ${otherNewRemaining}`);
-                  syncCount++;
-                } else {
-                  console.log(`${LOG_PREFIX}   ${otherPeriod.monthName} ${otherPeriod.year}: debt not found (may not exist yet)`);
-                }
-              }
-              console.log(`${LOG_PREFIX} Payment synced to ${syncCount} future periods`);
-              console.log('======= FIN PAGAR DEUDA =======');
-              await loadPeriod();
-              
-              if (newRemaining <= 0) {
-                Alert.alert('¡Felicidades!', 'Has pagado completamente esta deuda 🎉');
-              } else {
-                Alert.alert('Pago registrado', `Ahora debes S/ ${newRemaining.toFixed(2)}`);
-              }
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo registrar el pago');
-            }
-          },
-        },
-      ]
-    );
+    try {
+      const repo = new SQLiteFinanceRepository(getDatabase());
+      const updatedDebts = [...period.debts];
+      const newRemaining = debt.remainingAmount - debt.monthlyPayment;
+      
+      updatedDebts[payDebtData.index] = {
+        ...debt,
+        paidThisMonth: true,
+        remainingAmount: Math.max(0, newRemaining),
+        isPaid: newRemaining <= 0,
+      };
+      
+      await repo.updatePeriod(period.id, { debts: updatedDebts });
+      
+      const allPeriods = await repo.getAllPeriods();
+      const debtName = debt.name;
+      const debtTotalAmount = debt.totalAmount;
+      const currentPeriodDate = new Date(period.year, parseInt(period.month.split('-')[1]) - 1);
+      
+      for (const otherPeriod of allPeriods) {
+        if (otherPeriod.id === period.id) continue;
+        const otherPeriodDate = new Date(otherPeriod.year, parseInt(otherPeriod.month.split('-')[1]) - 1);
+        if (otherPeriodDate <= currentPeriodDate) continue;
+        
+        const otherDebtIndex = otherPeriod.debts.findIndex(d => d.name === debtName && d.totalAmount === debtTotalAmount);
+        if (otherDebtIndex >= 0) {
+          const otherDebt = otherPeriod.debts[otherDebtIndex];
+          const otherNewRemaining = Math.max(0, otherDebt.remainingAmount - debt.monthlyPayment);
+          const updatedOtherDebts = [...otherPeriod.debts];
+          updatedOtherDebts[otherDebtIndex] = { ...otherDebt, remainingAmount: otherNewRemaining, isPaid: otherNewRemaining <= 0 };
+          await repo.updatePeriod(otherPeriod.id, { debts: updatedOtherDebts });
+        }
+      }
+      
+      await loadPeriod();
+      setPayDebtDialogVisible(false);
+      setPayDebtData(null);
+      
+      if (newRemaining <= 0) {
+        setFeedbackData({ title: '¡Felicidades!', message: 'Has pagado completamente esta deuda', variant: 'success' });
+      } else {
+        setFeedbackData({ title: 'Pago registrado', message: `Ahora debes ${formatCurrency(newRemaining)}`, variant: 'success' });
+      }
+      setFeedbackDialogVisible(true);
+    } catch (error) {
+      setPayDebtDialogVisible(false);
+      setPayDebtData(null);
+      setFeedbackData({ title: 'Error', message: 'No se pudo registrar el pago', variant: 'info' });
+      setFeedbackDialogVisible(true);
+    }
   };
 
   const handleDeleteItem = async (type: 'income' | 'expense' | 'debt', index: number) => {
@@ -353,57 +357,40 @@ export const FinanceDetailScreen: React.FC = () => {
       }
     };
     
-    if (type === 'debt') {
-      Alert.alert(
-        'Eliminar deuda',
-        `¿Eliminar "${itemName}" de todos los meses?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Eliminar', style: 'destructive', onPress: handleDelete },
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Eliminar registro',
-        `¿Estás seguro de eliminar "${itemName}"?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Eliminar', style: 'destructive', onPress: handleDelete },
-        ]
-      );
-    }
+    const title = type === 'debt' ? 'Eliminar deuda' : 'Eliminar registro';
+    const message = type === 'debt'
+      ? `¿Eliminar "${itemName}" de todos los meses?`
+      : `¿Estás seguro de eliminar "${itemName}"?`;
+
+    setDeleteItemData({ type, name: itemName, onConfirm: handleDelete });
+    setDeleteItemDialogVisible(true);
   };
 
   const handleDeleteSavings = async () => {
     if (!period || totalSavings <= 0) return;
-    
-    Alert.alert(
-      'Eliminar ahorros',
-      `¿Estás seguro de eliminar S/ ${totalSavings.toFixed(2)} en ahorros?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const repo = new SQLiteFinanceRepository(getDatabase());
-              await repo.updatePeriod(period.id, { savings: 0 });
-              await loadPeriod();
-            } catch (error) {
-              Alert.alert('Error', 'No se pudieron eliminar los ahorros');
-            }
-          },
-        },
-      ]
-    );
+    setDeleteSavingsDialogVisible(true);
+  };
+
+  const confirmDeleteSavings = async () => {
+    if (!period) return;
+    try {
+      const repo = new SQLiteFinanceRepository(getDatabase());
+      await repo.updatePeriod(period.id, { savings: 0 });
+      await loadPeriod();
+    } catch (error) {
+      Alert.alert('Error', 'No se pudieron eliminar los ahorros');
+    }
+    setDeleteSavingsDialogVisible(false);
   };
 
   if (!period) {
     return (
-      <SafeAreaView style={styles.container}>
-        <Text>Cargando...</Text>
-      </SafeAreaView>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.loadingContainer}>
+          <Wallet size={32} color={colors.primary.main} weight="light" />
+          <Text style={styles.loadingText}>Cargando...</Text>
+        </SafeAreaView>
+      </View>
     );
   }
 
@@ -416,248 +403,448 @@ export const FinanceDetailScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1565C0" />
-      <LinearGradient colors={['#1565C0', '#2196F3']} style={styles.header}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
+      <LinearGradient colors={[colors.primary.dark, colors.primary.main]} style={styles.header}>
         <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-              <Text style={styles.backBtnText}>‹ Volver</Text>
+              <CaretRight size={18} color={colors.common.white} weight="bold" style={{ transform: [{ rotate: '180deg' }] }} />
             </TouchableOpacity>
+            <Wallet size={22} color={colors.common.white} weight="fill" />
             <View style={styles.headerTextContainer}>
-              <Text style={styles.headerTitle}>{period.monthName} {period.year}</Text>
-              <Text style={styles.headerSubtitle}>Finanzas</Text>
+              <Text style={styles.headerTitle} numberOfLines={1}>{period.monthName} {period.year}</Text>
+              <Text style={styles.headerSubtitle}>Finanzas del período</Text>
             </View>
           </View>
         </SafeAreaView>
       </LinearGradient>
 
-      <SafeAreaView style={styles.contentContainer} edges={['bottom']}>
-        <View style={styles.summary}>
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Ingresos</Text>
-              <Text style={[styles.summaryValue, { color: '#43A047' }]}>{formatCurrency(totalIncome)}</Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Gastos</Text>
-              <Text style={[styles.summaryValue, { color: '#E53935' }]}>{formatCurrency(totalExpenses)}</Text>
-            </View>
-          </View>
-          <View style={[styles.summaryRow, styles.summaryTotal]}>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Balance</Text>
-              <Text style={[styles.summaryValue, { color: balance >= 0 ? '#43A047' : '#E53935' }]}>{formatCurrency(balance)}</Text>
-            </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Ahorros</Text>
-              <Text style={[styles.summaryValue, { color: '#1565C0' }]}>{formatCurrency(totalSavings)}</Text>
-            </View>
-          </View>
-          {totalDebtRemaining > 0 && (
-            <View style={[styles.summaryRow, styles.debtRow]}>
+      <View style={styles.contentContainer}>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryGrid}>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryLabel, styles.debtLabel]}>Deuda pendiente</Text>
-                <Text style={[styles.summaryValue, { color: '#FF9800' }]}>{formatCurrency(totalDebtRemaining)}</Text>
+                <View style={styles.summaryIconRow}>
+                  <View style={[styles.summaryDot, { backgroundColor: colors.accent.green }]} />
+                  <Text style={styles.summaryLabel}>Ingresos</Text>
+                </View>
+                <Text style={[styles.summaryValue, styles.incomeValue]} numberOfLines={1}>{formatCurrency(totalIncome)}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <View style={styles.summaryIconRow}>
+                  <View style={[styles.summaryDot, { backgroundColor: colors.accent.red }]} />
+                  <Text style={styles.summaryLabel}>Gastos</Text>
+                </View>
+                <Text style={[styles.summaryValue, styles.expenseValue]} numberOfLines={1}>{formatCurrency(totalExpenses)}</Text>
               </View>
             </View>
-          )}
-        </View>
-
-        <View style={styles.actionsContainer}>
-          <Text style={styles.actionsTitle}>Agregar</Text>
-          <View style={styles.actions}>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#E8F5E9' }]} onPress={() => { setAddType('income'); setShowAddModal(true); }}>
-              <Text style={styles.actionBtnIcon}>💵</Text>
-              <Text style={styles.actionBtnLabel}>Ingreso</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FFEBEE' }]} onPress={() => { setAddType('expense'); setShowAddModal(true); }}>
-              <Text style={styles.actionBtnIcon}>📝</Text>
-              <Text style={styles.actionBtnLabel}>Gasto</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FFF3E0' }]} onPress={() => setShowDebtModal(true)}>
-              <Text style={styles.actionBtnIcon}>🏦</Text>
-              <Text style={styles.actionBtnLabel}>Deuda</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#E3F2FD' }]} onPress={() => setShowSavingsModal(true)}>
-              <Text style={styles.actionBtnIcon}>💎</Text>
-              <Text style={styles.actionBtnLabel}>Ahorro</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <ScrollView style={styles.content}>
-        {period.income.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>💵 Ingresos ({period.income.length})</Text>
-            {period.income.map((inc, i) => (
-              <TouchableOpacity key={i} style={styles.item} onLongPress={() => handleDeleteItem('income', i)}>
-                <Text style={styles.itemText}>{inc.source}</Text>
-                <Text style={[styles.itemValue, { color: '#43A047' }]}>{formatCurrency(inc.amount)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {period.expenses.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📝 Gastos ({period.expenses.length})</Text>
-            {period.expenses.map((exp, i) => (
-              <TouchableOpacity key={i} style={styles.item} onLongPress={() => handleDeleteItem('expense', i)}>
-                <Text style={styles.itemText}>{exp.subcategory}</Text>
-                <Text style={[styles.itemValue, { color: '#E53935' }]}>{formatCurrency(exp.amount)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {period.debts.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🏦 Deudas ({period.debts.length})</Text>
-            {period.debts.map((debt, i) => (
-              <TouchableOpacity key={i} style={styles.item} onPress={() => !debt.paidThisMonth && handleDebtPayment(i)} onLongPress={() => handleDeleteItem('debt', i)}>
-                <View>
-                  <Text style={styles.itemText}>{debt.name}</Text>
-                  <Text style={styles.itemSubtext}>Pago: {formatCurrency(debt.monthlyPayment)} • Restante: {formatCurrency(debt.remainingAmount)}</Text>
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryItem}>
+                <View style={styles.summaryIconRow}>
+                  <View style={[styles.summaryDot, { backgroundColor: balance >= 0 ? colors.accent.green : colors.accent.red }]} />
+                  <Text style={styles.summaryLabel}>Balance</Text>
                 </View>
-                <Text style={[styles.itemValue, { color: debt.paidThisMonth ? '#43A047' : '#FF9800' }]}>
-                  {debt.paidThisMonth ? '✓ Pagado' : 'Toca para pagar'}
+                <Text style={[styles.summaryValue, balance >= 0 ? styles.incomeValue : styles.expenseValue]} numberOfLines={1}>
+                  {formatCurrency(balance)}
                 </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {totalSavings > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>💎 Ahorros ({totalSavings > 0 ? 1 : 0})</Text>
-            <TouchableOpacity style={styles.item} onLongPress={() => handleDeleteSavings()}>
-              <Text style={styles.itemText}>Total Ahorrado</Text>
-              <Text style={[styles.itemValue, { color: '#1565C0' }]}>{formatCurrency(totalSavings)}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {period.income.length === 0 && period.expenses.length === 0 && period.debts.length === 0 && totalSavings === 0 && (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>Sin registros. Agrega ingresos, gastos o deudas.</Text>
-          </View>
-        )}
-      </ScrollView>
-
-      <Modal visible={showAddModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Agregar {addType === 'income' ? 'Ingreso' : 'Gasto'}</Text>
-            
-            {addType === 'income' ? (
+              </View>
+              <View style={styles.summaryItem}>
+                <View style={styles.summaryIconRow}>
+                  <View style={[styles.summaryDot, { backgroundColor: colors.primary.main }]} />
+                  <Text style={styles.summaryLabel}>Ahorros</Text>
+                </View>
+                <Text style={[styles.summaryValue, styles.savingsValue]} numberOfLines={1}>{formatCurrency(totalSavings)}</Text>
+              </View>
+            </View>
+            {totalDebtRemaining > 0 && (
               <>
-                <TouchableOpacity style={styles.selectButton} onPress={() => setShowSourcePicker(true)}>
-                  <Text style={[styles.selectButtonText, !selectedSource && styles.selectButtonPlaceholder]}>
-                    {selectedSource || 'Seleccionar fuente'}
-                  </Text>
-                  <Text style={styles.selectArrow}>▼</Text>
-                </TouchableOpacity>
-                <Modal visible={showSourcePicker} transparent animationType="fade">
-                  <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowSourcePicker(false)}>
-                    <View style={styles.pickerContent}>
-                      <Text style={styles.pickerTitle}>Seleccionar fuente</Text>
-                      {INCOME_SOURCES.map((source) => (
-                        <TouchableOpacity key={source} style={styles.pickerOption} onPress={() => { setSelectedSource(source); setShowSourcePicker(false); }}>
-                          <Text style={styles.pickerOptionText}>{source}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </TouchableOpacity>
-                </Modal>
-              </>
-            ) : (
-              <>
-                <TouchableOpacity style={styles.selectButton} onPress={() => setShowCategoryPicker(true)}>
-                  <Text style={[styles.selectButtonText, !selectedCategory && styles.selectButtonPlaceholder]}>
-                    {selectedCategory || 'Seleccionar categoría'}
-                  </Text>
-                  <Text style={styles.selectArrow}>▼</Text>
-                </TouchableOpacity>
-                <Modal visible={showCategoryPicker} transparent animationType="fade">
-                  <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowCategoryPicker(false)}>
-                    <View style={styles.pickerContent}>
-                      <Text style={styles.pickerTitle}>Seleccionar categoría</Text>
-                      {EXPENSE_CATEGORIES.map((cat) => (
-                        <TouchableOpacity key={cat} style={styles.pickerOption} onPress={() => { setSelectedCategory(cat); setShowCategoryPicker(false); }}>
-                          <Text style={styles.pickerOptionText}>{cat}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </TouchableOpacity>
-                </Modal>
+                <View style={styles.summaryDivider} />
+                <View style={styles.debtSummaryRow}>
+                  <View style={styles.summaryIconRow}>
+                    <Warning size={16} color={colors.warning} weight="fill" />
+                    <Text style={styles.debtLabel}>Deuda pendiente</Text>
+                  </View>
+                  <Text style={[styles.summaryValue, styles.debtValue]} numberOfLines={1}>{formatCurrency(totalDebtRemaining)}</Text>
+                </View>
               </>
             )}
-            
-            <TextInput style={styles.input} placeholder="Monto (S/)" keyboardType="numeric" value={newAmount} onChangeText={setNewAmount} placeholderTextColor={colors.textMuted} />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowAddModal(false); setSelectedSource(''); setSelectedCategory(''); setNewAmount(''); }}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
+          </View>
+
+          <View style={styles.actionsCard}>
+            <Text style={styles.actionsTitle}>Acciones rápidas</Text>
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.accent.greenLight }]}
+                onPress={() => { setAddType('income'); setShowAddModal(true); }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.accent.green }]}>
+                  <TrendUp size={18} color={colors.common.white} weight="bold" />
+                </View>
+                <Text style={styles.actionBtnLabel}>Ingreso</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirm} onPress={handleAddItem}><Text style={styles.modalConfirmText}>Agregar</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.accent.redLight }]}
+                onPress={() => { setAddType('expense'); setShowAddModal(true); }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.accent.red }]}>
+                  <TrendDown size={18} color={colors.common.white} weight="bold" />
+                </View>
+                <Text style={styles.actionBtnLabel}>Gasto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.warningLight }]}
+                onPress={() => setShowDebtModal(true)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.warning }]}>
+                  <Warning size={18} color={colors.common.white} weight="bold" />
+                </View>
+                <Text style={styles.actionBtnLabel}>Deuda</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.primary.light }]}
+                onPress={() => setShowSavingsModal(true)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.primary.main }]}>
+                  <Wallet size={18} color={colors.common.white} weight="bold" />
+                </View>
+                <Text style={styles.actionBtnLabel}>Ahorro</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
 
-      <Modal visible={showDebtModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Agregar Deuda/Préstamo</Text>
-            
-            <TouchableOpacity style={styles.selectButton} onPress={() => setShowDebtTypePicker(true)}>
-              <Text style={[styles.selectButtonText, !selectedDebtType && styles.selectButtonPlaceholder]}>
-                {selectedDebtType || 'Seleccionar tipo de deuda'}
-              </Text>
-              <Text style={styles.selectArrow}>▼</Text>
-            </TouchableOpacity>
-            <Modal visible={showDebtTypePicker} transparent animationType="fade">
-              <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowDebtTypePicker(false)}>
-                <View style={styles.pickerContent}>
-                  <Text style={styles.pickerTitle}>Seleccionar tipo de deuda</Text>
-                  {DEBT_TYPES.map((type) => (
-                    <TouchableOpacity key={type} style={styles.pickerOption} onPress={() => { setSelectedDebtType(type); setShowDebtTypePicker(false); }}>
-                      <Text style={styles.pickerOptionText}>{type}</Text>
-                    </TouchableOpacity>
-                  ))}
+          {period.income.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={[styles.sectionIconContainer, { backgroundColor: colors.accent.greenLight }]}>
+                    <TrendUp size={16} color={colors.accent.green} weight="fill" />
+                  </View>
+                  <Text style={styles.sectionTitle}>Ingresos</Text>
+                </View>
+                <Text style={styles.sectionCount}>{period.income.length}</Text>
+              </View>
+              {period.income.map((inc, i) => (
+                <TouchableOpacity key={i} style={styles.item} onLongPress={() => handleDeleteItem('income', i)} activeOpacity={0.7}>
+                  <View style={styles.itemLeft}>
+                    <View style={[styles.itemDot, { backgroundColor: colors.accent.green }]} />
+                    <Text style={styles.itemText}>{inc.source}</Text>
+                  </View>
+                  <View style={styles.itemRight}>
+                    <Text style={[styles.itemValue, styles.incomeValue]}>{formatCurrency(inc.amount)}</Text>
+                    <Trash size={14} color={colors.textMuted} weight="light" />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {period.expenses.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={[styles.sectionIconContainer, { backgroundColor: colors.accent.redLight }]}>
+                    <TrendDown size={16} color={colors.accent.red} weight="fill" />
+                  </View>
+                  <Text style={styles.sectionTitle}>Gastos</Text>
+                </View>
+                <Text style={styles.sectionCount}>{period.expenses.length}</Text>
+              </View>
+              {period.expenses.map((exp, i) => (
+                <TouchableOpacity key={i} style={styles.item} onLongPress={() => handleDeleteItem('expense', i)} activeOpacity={0.7}>
+                  <View style={styles.itemLeft}>
+                    <View style={[styles.itemDot, { backgroundColor: colors.accent.red }]} />
+                    <Text style={styles.itemText}>{exp.subcategory}</Text>
+                  </View>
+                  <View style={styles.itemRight}>
+                    <Text style={[styles.itemValue, styles.expenseValue]}>{formatCurrency(exp.amount)}</Text>
+                    <Trash size={14} color={colors.textMuted} weight="light" />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {period.debts.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={[styles.sectionIconContainer, { backgroundColor: colors.warningLight }]}>
+                    <Warning size={16} color={colors.warning} weight="fill" />
+                  </View>
+                  <Text style={styles.sectionTitle}>Deudas</Text>
+                </View>
+                <Text style={styles.sectionCount}>{period.debts.length}</Text>
+              </View>
+              {period.debts.map((debt, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.item}
+                  onPress={() => !debt.paidThisMonth && handleDebtPayment(i)}
+                  onLongPress={() => handleDeleteItem('debt', i)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.itemLeft}>
+                    <View style={[styles.itemDot, { backgroundColor: debt.paidThisMonth ? colors.accent.green : colors.warning }]} />
+                    <View style={styles.itemContent}>
+                      <Text style={styles.itemText}>{debt.name}</Text>
+                      <Text style={styles.itemSubtext} numberOfLines={2}>
+                        Cuota: {formatCurrency(debt.monthlyPayment)} · Restante: {formatCurrency(debt.remainingAmount)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.itemRight}>
+                    {debt.paidThisMonth ? (
+                      <View style={styles.paidBadge}>
+                        <Check size={12} color={colors.accent.green} weight="bold" />
+                        <Text style={styles.paidBadgeText}>Pagado</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.payBadge}>
+                        <Text style={styles.payBadgeText}>Pagar</Text>
+                        <CaretRight size={12} color={colors.primary.main} weight="bold" />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {totalSavings > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <View style={[styles.sectionIconContainer, { backgroundColor: colors.primary.light }]}>
+                    <Wallet size={16} color={colors.primary.main} weight="fill" />
+                  </View>
+                  <Text style={styles.sectionTitle}>Ahorros</Text>
+                </View>
+                <Text style={styles.sectionCount}>1</Text>
+              </View>
+              <TouchableOpacity style={styles.item} onLongPress={() => handleDeleteSavings()} activeOpacity={0.7}>
+                <View style={styles.itemLeft}>
+                  <View style={[styles.itemDot, { backgroundColor: colors.primary.main }]} />
+                  <Text style={styles.itemText}>Total Ahorrado</Text>
+                </View>
+                <View style={styles.itemRight}>
+                  <Text style={[styles.itemValue, styles.savingsValue]}>{formatCurrency(totalSavings)}</Text>
+                  <Trash size={14} color={colors.textMuted} weight="light" />
                 </View>
               </TouchableOpacity>
-            </Modal>
-            
-            <TextInput style={styles.input} placeholder="Monto total (S/)" keyboardType="numeric" value={newAmount} onChangeText={setNewAmount} placeholderTextColor={colors.textMuted} />
-            <TextInput style={styles.input} placeholder="Meses a pagar" keyboardType="numeric" value={debtMonths} onChangeText={setDebtMonths} placeholderTextColor={colors.textMuted} />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowDebtModal(false); setSelectedDebtType(''); setNewAmount(''); setDebtMonths(''); }}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirm} onPress={handleAddDebt}><Text style={styles.modalConfirmText}>Agregar</Text></TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
+          )}
 
-      <Modal visible={showSavingsModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>💎 Registrar Ahorro</Text>
-            <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 16 }}>
-              Tus ahorros actuales: {formatCurrency(totalSavings)}
-            </Text>
-            <TextInput style={styles.input} placeholder="Monto a ahorrar (S/)" keyboardType="numeric" value={newSavings} onChangeText={setNewSavings} placeholderTextColor={colors.textMuted} />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowSavingsModal(false); setNewSavings(''); }}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirm} onPress={handleSaveSavings}><Text style={styles.modalConfirmText}>Guardar</Text></TouchableOpacity>
+          {period.income.length === 0 && period.expenses.length === 0 && period.debts.length === 0 && totalSavings === 0 && (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}>
+                <Wallet size={48} color={colors.textMuted} weight="light" />
+              </View>
+              <Text style={styles.emptyTitle}>Sin registros</Text>
+              <Text style={styles.emptyText}>Agrega ingresos, gastos o deudas para comenzar</Text>
             </View>
-          </View>
-        </View>
-      </Modal>
-      </SafeAreaView>
+          )}
+
+          <View style={styles.bottomSpacer} />
+        </ScrollView>
+
+        <Modal visible={showAddModal} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => { setShowAddModal(false); setSelectedSource(''); setSelectedCategory(''); setNewAmount(''); }}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={[styles.modalIconContainer, { backgroundColor: addType === 'income' ? colors.accent.greenLight : colors.accent.redLight }]}>
+                  {addType === 'income' ? (
+                    <TrendUp size={24} color={colors.accent.green} weight="fill" />
+                  ) : (
+                    <TrendDown size={24} color={colors.accent.red} weight="fill" />
+                  )}
+                </View>
+                <View style={styles.modalHeaderText}>
+                  <Text style={styles.modalTitle}>Agregar {addType === 'income' ? 'Ingreso' : 'Gasto'}</Text>
+                  <Text style={styles.modalSubtitle}>Registra un nuevo movimiento</Text>
+                </View>
+              </View>
+
+              {addType === 'income' ? (
+                <>
+                  <TouchableOpacity style={styles.selectButton} onPress={() => setShowSourcePicker(true)} activeOpacity={0.7}>
+                    <Text style={[styles.selectButtonText, !selectedSource && styles.selectButtonPlaceholder]}>
+                      {selectedSource || 'Seleccionar fuente'}
+                    </Text>
+                    <CaretRight size={16} color={colors.textMuted} weight="bold" />
+                  </TouchableOpacity>
+                  <Modal visible={showSourcePicker} transparent animationType="fade">
+                    <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowSourcePicker(false)} activeOpacity={1}>
+                      <View style={styles.pickerContent}>
+                        <Text style={styles.pickerTitle}>Seleccionar fuente</Text>
+                        {INCOME_SOURCES.map((source) => (
+                          <TouchableOpacity key={source} style={styles.pickerOption} onPress={() => { setSelectedSource(source); setShowSourcePicker(false); }} activeOpacity={0.7}>
+                            <Text style={styles.pickerOptionText}>{source}</Text>
+                            {selectedSource === source && <Check size={16} color={colors.primary.main} weight="bold" />}
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </TouchableOpacity>
+                  </Modal>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.selectButton} onPress={() => setShowCategoryPicker(true)} activeOpacity={0.7}>
+                    <Text style={[styles.selectButtonText, !selectedCategory && styles.selectButtonPlaceholder]}>
+                      {selectedCategory || 'Seleccionar categoría'}
+                    </Text>
+                    <CaretRight size={16} color={colors.textMuted} weight="bold" />
+                  </TouchableOpacity>
+                  <Modal visible={showCategoryPicker} transparent animationType="fade">
+                    <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowCategoryPicker(false)} activeOpacity={1}>
+                      <View style={styles.pickerContent}>
+                        <Text style={styles.pickerTitle}>Seleccionar categoría</Text>
+                        {EXPENSE_CATEGORIES.map((cat) => (
+                          <TouchableOpacity key={cat} style={styles.pickerOption} onPress={() => { setSelectedCategory(cat); setShowCategoryPicker(false); }} activeOpacity={0.7}>
+                            <Text style={styles.pickerOptionText}>{cat}</Text>
+                            {selectedCategory === cat && <Check size={16} color={colors.primary.main} weight="bold" />}
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </TouchableOpacity>
+                  </Modal>
+                </>
+              )}
+
+              <TextInput style={styles.input} placeholder="Monto (S/)" keyboardType="numeric" value={newAmount} onChangeText={setNewAmount} placeholderTextColor={colors.input.placeholder} />
+              <View style={styles.modalBtns}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowAddModal(false); setSelectedSource(''); setSelectedCategory(''); setNewAmount(''); }} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirm} onPress={handleAddItem} activeOpacity={0.7}>
+                  <Plus size={16} color={colors.common.white} weight="bold" />
+                  <Text style={styles.modalConfirmText}>Agregar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        <Modal visible={showDebtModal} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => { setShowDebtModal(false); setSelectedDebtType(''); setNewAmount(''); setDebtMonths(''); }}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={[styles.modalIconContainer, { backgroundColor: colors.warningLight }]}>
+                  <Warning size={24} color={colors.warning} weight="fill" />
+                </View>
+                <View style={styles.modalHeaderText}>
+                  <Text style={styles.modalTitle}>Agregar Deuda/Préstamo</Text>
+                  <Text style={styles.modalSubtitle}>Registra una nueva deuda</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.selectButton} onPress={() => setShowDebtTypePicker(true)} activeOpacity={0.7}>
+                <Text style={[styles.selectButtonText, !selectedDebtType && styles.selectButtonPlaceholder]}>
+                  {selectedDebtType || 'Seleccionar tipo de deuda'}
+                </Text>
+                <CaretRight size={16} color={colors.textMuted} weight="bold" />
+              </TouchableOpacity>
+              <Modal visible={showDebtTypePicker} transparent animationType="fade">
+                <TouchableOpacity style={styles.pickerOverlay} onPress={() => setShowDebtTypePicker(false)} activeOpacity={1}>
+                  <View style={styles.pickerContent}>
+                    <Text style={styles.pickerTitle}>Seleccionar tipo de deuda</Text>
+                    {DEBT_TYPES.map((type) => (
+                      <TouchableOpacity key={type} style={styles.pickerOption} onPress={() => { setSelectedDebtType(type); setShowDebtTypePicker(false); }} activeOpacity={0.7}>
+                        <Text style={styles.pickerOptionText}>{type}</Text>
+                        {selectedDebtType === type && <Check size={16} color={colors.primary.main} weight="bold" />}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </TouchableOpacity>
+              </Modal>
+
+              <TextInput style={styles.input} placeholder="Monto total (S/)" keyboardType="numeric" value={newAmount} onChangeText={setNewAmount} placeholderTextColor={colors.input.placeholder} />
+              <TextInput style={styles.input} placeholder="Meses a pagar" keyboardType="numeric" value={debtMonths} onChangeText={setDebtMonths} placeholderTextColor={colors.input.placeholder} />
+              <View style={styles.modalBtns}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowDebtModal(false); setSelectedDebtType(''); setNewAmount(''); setDebtMonths(''); }} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirm} onPress={handleAddDebt} activeOpacity={0.7}>
+                  <Plus size={16} color={colors.common.white} weight="bold" />
+                  <Text style={styles.modalConfirmText}>Agregar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        <Modal visible={showSavingsModal} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => { setShowSavingsModal(false); setNewSavings(''); }}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={[styles.modalIconContainer, { backgroundColor: colors.primary.light }]}>
+                  <Wallet size={24} color={colors.primary.main} weight="fill" />
+                </View>
+                <View style={styles.modalHeaderText}>
+                  <Text style={styles.modalTitle}>Registrar Ahorro</Text>
+                  <Text style={styles.modalSubtitle}>Ahorros actuales: {formatCurrency(totalSavings)}</Text>
+                </View>
+              </View>
+
+              <TextInput style={styles.input} placeholder="Monto a ahorrar (S/)" keyboardType="numeric" value={newSavings} onChangeText={setNewSavings} placeholderTextColor={colors.input.placeholder} />
+              <View style={styles.modalBtns}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowSavingsModal(false); setNewSavings(''); }} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalConfirm} onPress={handleSaveSavings} activeOpacity={0.7}>
+                  <Check size={16} color={colors.common.white} weight="bold" />
+                  <Text style={styles.modalConfirmText}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      </View>
+
+      <ConfirmDialog
+        visible={deleteItemDialogVisible}
+        title={deleteItemData?.type === 'debt' ? 'Eliminar deuda' : 'Eliminar registro'}
+        message={deleteItemData?.type === 'debt'
+          ? `¿Eliminar "${deleteItemData?.name}" de todos los meses?`
+          : `¿Estás seguro de eliminar "${deleteItemData?.name}"?`}
+        confirmText="Eliminar"
+        onConfirm={() => { deleteItemData?.onConfirm(); setDeleteItemDialogVisible(false); setDeleteItemData(null); }}
+        onCancel={() => { setDeleteItemDialogVisible(false); setDeleteItemData(null); }}
+      />
+
+      <ConfirmDialog
+        visible={deleteSavingsDialogVisible}
+        title="Eliminar ahorros"
+        message={`¿Estás seguro de eliminar ${formatCurrency(totalSavings)} en ahorros?`}
+        confirmText="Eliminar"
+        onConfirm={confirmDeleteSavings}
+        onCancel={() => setDeleteSavingsDialogVisible(false)}
+      />
+
+      <ConfirmDialog
+        visible={payDebtDialogVisible}
+        title={`Pagar cuota - ${payDebtData?.name || ''}`}
+        message={payDebtData ? `¿Ya pagaste la cuota de ${formatCurrency(payDebtData.monthlyPayment)} este mes?\n\nTotal restante: ${formatCurrency(payDebtData.remainingAmount)}` : ''}
+        variant="action"
+        confirmText="Sí, pagué"
+        cancelText="No"
+        onConfirm={confirmDebtPayment}
+        onCancel={() => { setPayDebtDialogVisible(false); setPayDebtData(null); }}
+      />
+
+      <ConfirmDialog
+        visible={feedbackDialogVisible}
+        title={feedbackData?.title || ''}
+        message={feedbackData?.message || ''}
+        variant={feedbackData?.variant || 'success'}
+        showCancel={false}
+        confirmText="Aceptar"
+        onConfirm={() => { setFeedbackDialogVisible(false); setFeedbackData(null); }}
+      />
     </View>
   );
 };
@@ -667,264 +854,414 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[12],
+  },
+  loadingText: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
   contentContainer: {
     flex: 1,
     backgroundColor: colors.background,
   },
   header: {
-    paddingBottom: 20,
+    paddingBottom: spacing[12],
   },
   headerSafeArea: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing[16],
+    paddingTop: spacing[6],
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[10],
+  },
+  backBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTextContainer: {
     flex: 1,
-    marginLeft: 8,
-  },
-  backBtn: {
-    paddingVertical: 8,
-    paddingRight: 12,
-  },
-  backBtnText: {
-    color: colors.common.white,
-    fontSize: 16,
-    fontWeight: '600',
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.common.white,
   },
   headerSubtitle: {
-    fontSize: 14,
+    ...typography.caption,
     color: colors.common.white,
-    opacity: 0.9,
-    marginTop: 2,
+    opacity: 0.85,
+    marginTop: spacing[2],
   },
-  summary: {
-    margin: 16,
-    marginBottom: 8,
+  scrollView: {
+    flex: 1,
+  },
+  summaryCard: {
+    marginHorizontal: spacing[20],
+    marginTop: spacing[16],
+    marginBottom: spacing[12],
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: borderRadius.xl,
+    padding: spacing[20],
+    ...shadows.md,
   },
-  summaryRow: {
+  summaryGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: spacing[16],
   },
   summaryItem: {
     flex: 1,
   },
-  debtRow: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#FFE0B2',
+  summaryIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[6],
+    marginBottom: spacing[4],
   },
-  debtLabel: {
-    color: '#F57C00',
-  },
-  actionsContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  actionsTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginBottom: 8,
+  summaryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
   },
   summaryLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
+    ...typography.captionMedium,
+    color: colors.textSecondary,
   },
   summaryValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 4,
+    ...typography.currency,
   },
-  summaryTotal: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+  incomeValue: {
+    color: colors.accent.green,
+  },
+  expenseValue: {
+    color: colors.accent.red,
+  },
+  savingsValue: {
+    color: colors.primary.main,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginVertical: spacing[16],
+  },
+  debtSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  debtLabel: {
+    ...typography.captionMedium,
+    color: colors.warning,
+    marginLeft: spacing[4],
+  },
+  debtValue: {
+    color: colors.warning,
+  },
+  actionsCard: {
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[16],
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    padding: spacing[20],
+    ...shadows.sm,
+  },
+  actionsTitle: {
+    ...typography.captionMedium,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing[12],
   },
   actions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 6,
+    gap: spacing[8],
   },
   actionBtn: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[12],
+    borderRadius: borderRadius.lg,
+    gap: spacing[6],
+  },
+  actionIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionBtnIcon: {
-    fontSize: 18,
-    marginBottom: 2,
-  },
   actionBtnLabel: {
-    fontSize: 10,
-    fontWeight: '600',
+    ...typography.tabLabel,
     color: colors.text,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
   },
   section: {
-    marginBottom: 20,
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[16],
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[10],
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
+  sectionIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.label,
     color: colors.text,
-    marginBottom: 12,
+  },
+  sectionCount: {
+    ...typography.caption,
+    color: colors.textMuted,
+    backgroundColor: colors.backgroundSecondary,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
   },
   item: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: colors.card,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: spacing[14],
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing[6],
+    ...shadows.sm,
+  },
+  itemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing[10],
+  },
+  itemDot: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
+  },
+  itemContent: {
+    flex: 1,
   },
   itemText: {
-    fontSize: 15,
+    ...typography.bodyMedium,
     color: colors.text,
   },
   itemSubtext: {
-    fontSize: 11,
+    ...typography.caption,
     color: colors.textMuted,
     marginTop: 2,
   },
-  itemValue: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  empty: {
+  itemRight: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 40,
+    gap: spacing[8],
+  },
+  itemValue: {
+    ...typography.currencySmall,
+  },
+  paidBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+    backgroundColor: colors.accent.greenLight,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[4],
+    borderRadius: borderRadius.full,
+  },
+  paidBadgeText: {
+    ...typography.captionMedium,
+    color: colors.accent.green,
+  },
+  payBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+    backgroundColor: colors.primary.light,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[4],
+    borderRadius: borderRadius.full,
+  },
+  payBadgeText: {
+    ...typography.captionMedium,
+    color: colors.primary.main,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: spacing[64],
+    paddingHorizontal: spacing[8],
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[20],
+  },
+  emptyTitle: {
+    ...typography.h3,
+    color: colors.text,
+    marginBottom: spacing[8],
   },
   emptyText: {
+    ...typography.bodySmall,
     color: colors.textMuted,
-    fontSize: 14,
+    textAlign: 'center',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: spacing[24],
   },
   modalContent: {
     backgroundColor: colors.common.white,
-    borderRadius: 20,
-    padding: 24,
-    width: '85%',
-    maxWidth: 340,
+    borderRadius: borderRadius.xl,
+    padding: spacing[24],
+    width: '100%',
+    maxWidth: 360,
+    ...shadows.xl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[12],
+    marginBottom: spacing[20],
+  },
+  modalIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHeaderText: {
+    flex: 1,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
+    ...typography.h3,
+    color: colors.text,
   },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 12,
-  },
-  modalBtns: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  modalCancel: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-  },
-  modalCancelText: {
-    fontWeight: '600',
-    color: '#666',
-  },
-  modalConfirm: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#2196F3',
-    alignItems: 'center',
-  },
-  modalConfirmText: {
-    fontWeight: '600',
-    color: colors.common.white,
+  modalSubtitle: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   selectButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.md,
+    padding: spacing[14],
+    marginBottom: spacing[12],
   },
   selectButtonText: {
-    fontSize: 16,
-    color: '#333',
+    ...typography.body,
+    color: colors.text,
   },
   selectButtonPlaceholder: {
-    color: colors.textMuted,
+    color: colors.input.placeholder,
   },
-  selectArrow: {
-    fontSize: 12,
-    color: '#666',
+  input: {
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.md,
+    padding: spacing[14],
+    ...typography.body,
+    color: colors.text,
+    marginBottom: spacing[12],
+  },
+  modalBtns: {
+    flexDirection: 'row',
+    gap: spacing[10],
+    marginTop: spacing[8],
+  },
+  modalCancel: {
+    flex: 1,
+    paddingVertical: spacing[14],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundTertiary,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    ...typography.button,
+    color: colors.textSecondary,
+  },
+  modalConfirm: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: spacing[14],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary.main,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[6],
+    ...shadows.primary,
+  },
+  modalConfirmText: {
+    ...typography.button,
+    color: colors.common.white,
   },
   pickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: spacing[24],
   },
   pickerContent: {
     backgroundColor: colors.common.white,
-    borderRadius: 16,
-    padding: 20,
-    width: '80%',
-    maxWidth: 300,
+    borderRadius: borderRadius.xl,
+    padding: spacing[20],
+    width: '100%',
+    maxWidth: 320,
+    maxHeight: '70%',
+    ...shadows.xl,
   },
   pickerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h4,
     color: colors.text,
-    marginBottom: 16,
+    marginBottom: spacing[16],
     textAlign: 'center',
   },
   pickerOption: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginBottom: 8,
-    backgroundColor: '#f5f5f5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[12],
+    paddingHorizontal: spacing[14],
+    borderRadius: borderRadius.md,
+    marginBottom: spacing[4],
+    backgroundColor: colors.backgroundSecondary,
   },
   pickerOptionText: {
-    fontSize: 16,
+    ...typography.bodyMedium,
     color: colors.text,
+  },
+  bottomSpacer: {
+    height: spacing[24],
   },
 });
 

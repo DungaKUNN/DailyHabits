@@ -9,26 +9,38 @@ import {
   Alert,
   Modal,
   StatusBar,
-  Share,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as ClipboardAPI from 'expo-clipboard';
+import { Share } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Lightning,
+  Drop,
+  GearSix,
+  Plus,
+  House,
+  CaretRight,
+  Trash,
+  MagnifyingGlass,
+  Share as ShareIcon,
+} from 'phosphor-react-native';
 import { ExpensePeriod, ExpenseSettings } from '../../domain/entities/Expense';
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { getDatabase } from '../../data/Database';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { colors } from '../theme/colors';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   getSavedGroupCode,
   getSavedGroupName,
   savePeriodToCloud,
   getPeriodsFromCloud,
   deletePeriodFromCloud,
-  subscribeToPeriods,
-  subscribeToSettings,
 } from '../../services/SyncService';
 
 type ExpensesScreenNavigationProp = StackNavigationProp<RootStackParamList, 'MainTabs'>;
@@ -45,7 +57,11 @@ const ExpensesScreen: React.FC = () => {
   const [groupCode, setGroupCode] = useState<string | null>(null);
   const [groupName, setGroupName] = useState<string>('Mi Grupo');
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ExpensePeriod | null>(null);
+  const [feedbackDialogVisible, setFeedbackDialogVisible] = useState(false);
+  const [feedbackData, setFeedbackData] = useState<{ title: string; message: string; variant: 'success' | 'info' } | null>(null);
+
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
   const slideAnim = React.useRef(new Animated.Value(50)).current;
 
@@ -77,33 +93,16 @@ const ExpensesScreen: React.FC = () => {
     console.log(`${LOG_PREFIX} initScreen - code: ${code}`);
     const name = await getSavedGroupName();
     console.log(`${LOG_PREFIX} initScreen - name: ${name}`);
-    
+
     if (code) {
       console.log(`${LOG_PREFIX} initScreen - hay código, cargando desde cloud`);
       setGroupCode(code);
       setGroupName(name || 'Mi Grupo');
-      
-      const unsubPeriods = subscribeToPeriods(code, (cloudPeriods) => {
-        console.log(`${LOG_PREFIX} initScreen - subscribeToPeriods callback - periods: ${cloudPeriods.length}`);
-        setPeriods(cloudPeriods);
-        setIsLoading(false);
-      });
-      
-      const unsubSettings = subscribeToSettings(code, (cloudSettings) => {
-        console.log(`${LOG_PREFIX} initScreen - subscribeToSettings callback`);
-        if (cloudSettings) setSettings(cloudSettings);
-      });
-      
+
       const cloudPeriods = await getPeriodsFromCloud(code);
       console.log(`${LOG_PREFIX} initScreen - cloudPeriods: ${cloudPeriods.length}`);
       setPeriods(cloudPeriods);
       setIsLoading(false);
-      
-      return () => {
-        console.log(`${LOG_PREFIX} initScreen - cleanup`);
-        unsubPeriods();
-        unsubSettings();
-      };
     } else {
       const repo = new SQLiteExpenseRepository(getDatabase());
       const [periodsData, settingsData] = await Promise.all([
@@ -121,7 +120,7 @@ const ExpensesScreen: React.FC = () => {
     try {
       const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
       console.log(`${LOG_PREFIX} createNewPeriod - monthStr: ${monthStr}`);
-      
+
       const existing = periods.find(p => p.month === monthStr);
       if (existing) {
         console.log(`${LOG_PREFIX} createNewPeriod - ya existe`);
@@ -130,7 +129,7 @@ const ExpensesScreen: React.FC = () => {
       }
 
       let latestReadings = new Map<string, number>();
-      
+
       if (groupCode) {
         if (periods.length > 0) {
           const sortedPeriods = [...periods].sort((a, b) => {
@@ -216,46 +215,44 @@ const ExpensesScreen: React.FC = () => {
       }
 
       setShowNewPeriodModal(false);
-      
+
       if (latestReadings.size > 0) {
-        Alert.alert(
-          'Período creado',
-          `Se creó ${MONTHS[selectedMonth]} ${selectedYear}.\n\nLas lecturas anteriores se copiaron automáticamente.`
-        );
+        setFeedbackData({
+          title: 'Período creado',
+          message: `Se creó ${MONTHS[selectedMonth]} ${selectedYear}.\n\nLas lecturas anteriores se copiaron automáticamente.`,
+          variant: 'success',
+        });
+        setFeedbackDialogVisible(true);
       }
     } catch (error) {
       console.error('Error creating period:', error);
-      Alert.alert('Error', 'No se pudo crear el período');
+      setFeedbackData({ title: 'Error', message: 'No se pudo crear el período', variant: 'info' });
+      setFeedbackDialogVisible(true);
     }
   };
 
   const deletePeriod = (period: ExpensePeriod) => {
-    Alert.alert(
-      'Eliminar período',
-      `¿Eliminar ${period.monthName} ${period.year}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (groupCode) {
-                await deletePeriodFromCloud(groupCode, period.id);
-              }
-              setPeriods(prev => prev.filter(p => p.id !== period.id));
-            } catch (error) {
-              console.error('Error deleting period:', error);
-            }
-          },
-        },
-      ]
-    );
+    setDeleteTarget(period);
+    setDeleteDialogVisible(true);
+  };
+
+  const confirmDeletePeriod = async () => {
+    if (!deleteTarget) return;
+    try {
+      if (groupCode) {
+        await deletePeriodFromCloud(groupCode, deleteTarget.id);
+      }
+      setPeriods(prev => prev.filter(p => p.id !== deleteTarget.id));
+    } catch (error) {
+      console.error('Error deleting period:', error);
+    }
+    setDeleteDialogVisible(false);
+    setDeleteTarget(null);
   };
 
   const handleShareCode = async () => {
     if (!groupCode) return;
-    
+
     try {
       await ClipboardAPI.setStringAsync(groupCode);
       await Share.share({
@@ -274,97 +271,109 @@ const ExpensesScreen: React.FC = () => {
     return period.floorsWater.reduce((sum, f) => sum + f.amount, 0);
   };
 
-  const PeriodCard: React.FC<{ period: ExpensePeriod }> = ({ period }) => (
+  const PeriodCard = React.memo<{ period: ExpensePeriod }>(({ period }) => (
     <TouchableOpacity
       style={styles.periodCard}
       onPress={() => navigation.navigate('ExpenseDetail', { periodId: period.id })}
       onLongPress={() => deletePeriod(period)}
+      activeOpacity={0.7}
     >
-      <LinearGradient
-        colors={['#ffffff', '#f8f9fa']}
-        style={styles.periodCardGradient}
-      >
+      <View style={styles.periodCardContent}>
         <View style={styles.periodHeader}>
-          <Text style={styles.periodMonth}>{period.monthName} {period.year}</Text>
-          <Text style={styles.periodTotal}>
+          <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName} {period.year}</Text>
+          <Text style={styles.periodTotal} numberOfLines={1}>
             {formatCurrency(getTotalElectricity(period) + getTotalWater(period))}
           </Text>
         </View>
-        
+
         <View style={styles.periodDetails}>
           <View style={styles.periodDetail}>
-            <Text style={styles.periodDetailIcon}>⚡</Text>
-            <View>
+            <View style={[styles.periodDetailIconContainer, styles.electricityIconBg]}>
+              <Lightning size={16} color={colors.accent.orange} weight="fill" />
+            </View>
+            <View style={styles.periodDetailTextContainer}>
               <Text style={styles.periodDetailLabel}>Electricidad</Text>
-              <Text style={styles.periodDetailValue}>
+              <Text style={styles.periodDetailValue} numberOfLines={1}>
                 {period.floorsElectricity.length} pisos • {formatCurrency(getTotalElectricity(period))}
               </Text>
             </View>
           </View>
-          
+
           <View style={styles.periodDetail}>
-            <Text style={styles.periodDetailIcon}>💧</Text>
-            <View>
+            <View style={[styles.periodDetailIconContainer, styles.waterIconBg]}>
+              <Drop size={16} color={colors.accent.blue} weight="fill" />
+            </View>
+            <View style={styles.periodDetailTextContainer}>
               <Text style={styles.periodDetailLabel}>Agua</Text>
-              <Text style={styles.periodDetailValue}>
+              <Text style={styles.periodDetailValue} numberOfLines={1}>
                 {formatCurrency(getTotalWater(period))}
               </Text>
             </View>
           </View>
         </View>
 
-        <Text style={styles.tapHint}>Toca para editar • Mantén para eliminar</Text>
-      </LinearGradient>
+        <View style={styles.periodFooter}>
+          <Text style={styles.tapHint}>Toca para editar</Text>
+          <View style={styles.tapHintDot} />
+          <Text style={styles.tapHint}>Mantén para eliminar</Text>
+        </View>
+      </View>
     </TouchableOpacity>
-  );
+  ));
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#1565C0', '#2196F3']}
-        style={styles.header}
-      >
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.headerTitle}>💡 {groupName}</Text>
-            <Text style={styles.headerSubtitle}>Luz y Agua</Text>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
+      <LinearGradient colors={[colors.primary.dark, colors.primary.main]} style={styles.header}>
+        <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+          <View style={styles.headerTop}>
+            <View style={styles.headerTitleRow}>
+              <House size={22} color={colors.common.white} weight="fill" />
+              <View>
+                <Text style={styles.headerTitle} numberOfLines={1}>{groupName}</Text>
+                <Text style={styles.headerSubtitle}>Luz y Agua</Text>
+              </View>
+            </View>
+            {groupCode && (
+              <TouchableOpacity style={styles.shareCodeButton} onPress={handleShareCode} activeOpacity={0.7}>
+                <ShareIcon size={14} color={colors.common.white} weight="bold" />
+                <Text style={styles.shareCodeText}>Compartir</Text>
+              </TouchableOpacity>
+            )}
           </View>
+
           {groupCode && (
-            <TouchableOpacity style={styles.shareCodeButton} onPress={handleShareCode}>
-              <Text style={styles.shareCodeIcon}>📤</Text>
-              <Text style={styles.shareCodeText}>Compartir</Text>
-            </TouchableOpacity>
+            <View style={styles.codeBanner}>
+              <Text style={styles.codeLabel}>Código:</Text>
+              <Text style={styles.codeValue} numberOfLines={1}>{groupCode}</Text>
+            </View>
           )}
-        </View>
-        
-        {groupCode && (
-          <View style={styles.codeBanner}>
-            <Text style={styles.codeLabel}>Código:</Text>
-            <Text style={styles.codeValue}>{groupCode}</Text>
-          </View>
-        )}
+        </SafeAreaView>
       </LinearGradient>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {settings && (
-          <Animated.View 
+          <Animated.View
             style={[
               styles.settingsCard,
               { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
             ]}
           >
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.settingsButton}
               onPress={() => navigation.navigate('FloorsConfig')}
+              activeOpacity={0.7}
             >
-              <Text style={styles.settingsIcon}>⚙️</Text>
+              <View style={styles.settingsIconContainer}>
+                <GearSix size={20} color={colors.primary.main} weight="bold" />
+              </View>
               <View style={styles.settingsText}>
                 <Text style={styles.settingsTitle}>Configuración</Text>
                 <Text style={styles.settingsSubtitle}>
                   {settings.floors.length} pisos • Tarifa: S/ {settings.electricityTariffPerKwh}/kWh
                 </Text>
               </View>
-              <Text style={styles.settingsArrow}>›</Text>
+              <CaretRight size={16} color={colors.textMuted} weight="bold" />
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -372,14 +381,12 @@ const ExpensesScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => setShowNewPeriodModal(true)}
+          activeOpacity={0.8}
         >
-          <LinearGradient
-            colors={['#4CAF50', '#388E3C']}
-            style={styles.addButtonGradient}
-          >
-            <Text style={styles.addButtonIcon}>+</Text>
+          <View style={styles.addButtonContent}>
+            <Plus size={20} color={colors.common.white} weight="bold" />
             <Text style={styles.addButtonText}>Nuevo período</Text>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
 
         {isLoading ? (
@@ -387,13 +394,15 @@ const ExpensesScreen: React.FC = () => {
             <Text style={styles.loadingText}>Cargando...</Text>
           </View>
         ) : periods.length === 0 ? (
-          <Animated.View 
+          <Animated.View
             style={[
               styles.emptyState,
               { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
             ]}
           >
-            <Text style={styles.emptyIcon}>📊</Text>
+            <View style={styles.emptyIconContainer}>
+              <MagnifyingGlass size={40} color={colors.textMuted} weight="light" />
+            </View>
             <Text style={styles.emptyTitle}>Sin registros</Text>
             <Text style={styles.emptyText}>
               Crea un nuevo período para comenzar a registrar tus gastos
@@ -424,7 +433,7 @@ const ExpensesScreen: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Nuevo Período</Text>
-            
+
             <Text style={styles.modalLabel}>Mes</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.monthScroll}>
               {MONTHS.map((month, index) => (
@@ -435,6 +444,7 @@ const ExpensesScreen: React.FC = () => {
                     selectedMonth === index && styles.monthButtonActive
                   ]}
                   onPress={() => setSelectedMonth(index)}
+                  activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.monthButtonText,
@@ -448,31 +458,35 @@ const ExpensesScreen: React.FC = () => {
 
             <Text style={styles.modalLabel}>Año</Text>
             <View style={styles.yearSelector}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.yearButton}
                 onPress={() => setSelectedYear(y => y - 1)}
+                activeOpacity={0.7}
               >
                 <Text style={styles.yearButtonText}>−</Text>
               </TouchableOpacity>
               <Text style={styles.yearText}>{selectedYear}</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.yearButton}
                 onPress={() => setSelectedYear(y => y + 1)}
+                activeOpacity={0.7}
               >
                 <Text style={styles.yearButtonText}>+</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.modalCancelButton}
                 onPress={() => setShowNewPeriodModal(false)}
+                activeOpacity={0.7}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.modalConfirmButton}
                 onPress={createNewPeriod}
+                activeOpacity={0.8}
               >
                 <Text style={styles.modalConfirmText}>Crear</Text>
               </TouchableOpacity>
@@ -480,6 +494,25 @@ const ExpensesScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      <ConfirmDialog
+        visible={deleteDialogVisible}
+        title="Eliminar período"
+        message={deleteTarget ? `¿Eliminar ${deleteTarget.monthName} ${deleteTarget.year}? Esta acción no se puede deshacer.` : ''}
+        confirmText="Eliminar"
+        onConfirm={confirmDeletePeriod}
+        onCancel={() => { setDeleteDialogVisible(false); setDeleteTarget(null); }}
+      />
+
+      <ConfirmDialog
+        visible={feedbackDialogVisible}
+        title={feedbackData?.title || ''}
+        message={feedbackData?.message || ''}
+        variant={feedbackData?.variant || 'success'}
+        showCancel={false}
+        confirmText="Aceptar"
+        onConfirm={() => { setFeedbackDialogVisible(false); setFeedbackData(null); }}
+      />
     </View>
   );
 };
@@ -490,332 +523,331 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    backgroundColor: colors.primary.main,
+    paddingBottom: spacing[16],
+  },
+  headerSafeArea: {
+    paddingHorizontal: spacing[16],
+    paddingTop: spacing[6],
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[10],
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.common.white,
   },
   headerSubtitle: {
-    fontSize: 14,
+    ...typography.caption,
     color: colors.common.white,
-    opacity: 0.9,
-    marginTop: 4,
+    opacity: 0.85,
+    marginTop: spacing[2],
   },
   shareCodeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  shareCodeIcon: {
-    fontSize: 14,
-    marginRight: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+    borderRadius: borderRadius.full,
+    gap: spacing[6],
   },
   shareCodeText: {
-    fontSize: 12,
+    ...typography.buttonSmall,
     color: colors.common.white,
-    fontWeight: '600',
   },
   codeBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
+    marginTop: spacing[10],
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+    borderRadius: borderRadius.sm,
     alignSelf: 'flex-start',
+    gap: spacing[8],
   },
   codeLabel: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.common.white,
-    opacity: 0.9,
-    marginRight: 8,
+    opacity: 0.7,
   },
   codeValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...typography.bodyMedium,
     color: colors.common.white,
-    letterSpacing: 3,
+    letterSpacing: 1,
+    flexShrink: 1,
   },
   scrollView: {
     flex: 1,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginHorizontal: 20,
-    marginTop: 20,
-    marginBottom: 12,
-  },
   settingsCard: {
-    marginHorizontal: 20,
-    marginBottom: 12,
+    marginHorizontal: spacing[20],
+    marginTop: spacing[16],
+    marginBottom: spacing[12],
     backgroundColor: colors.card,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
+    borderRadius: borderRadius.lg,
+    ...shadows.md,
   },
   settingsButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: spacing[16],
+    gap: spacing[12],
   },
-  settingsIcon: {
-    fontSize: 24,
-    marginRight: 12,
+  settingsIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primary.light,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingsText: {
     flex: 1,
   },
   settingsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...typography.bodyMedium,
     color: colors.text,
   },
   settingsSubtitle: {
-    fontSize: 12,
+    ...typography.caption,
     color: colors.textMuted,
-    marginTop: 2,
-  },
-  settingsArrow: {
-    fontSize: 24,
-    color: colors.textMuted,
+    marginTop: spacing[2],
   },
   addButton: {
-    margin: 16,
-    marginTop: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginHorizontal: spacing[20],
+    marginBottom: spacing[16],
+    backgroundColor: colors.primary.main,
+    borderRadius: borderRadius.md,
+    ...shadows.primary,
   },
-  addButtonGradient: {
+  addButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 8,
-  },
-  addButtonIcon: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
+    paddingVertical: spacing[16],
+    gap: spacing[8],
   },
   addButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
+    ...typography.button,
+    color: colors.common.white,
   },
   loadingContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    padding: spacing[10],
   },
   loadingText: {
-    fontSize: 16,
-    color: '#666',
+    ...typography.body,
+    color: colors.textMuted,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    padding: spacing[10],
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius['2xl'],
+    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[16],
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
+    ...typography.h4,
+    color: colors.text,
+    marginBottom: spacing[8],
   },
   emptyText: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
   periodsList: {
-    padding: 16,
-    gap: 12,
+    paddingHorizontal: spacing[20],
+    paddingBottom: spacing[8],
+    gap: spacing[12],
   },
   periodCard: {
     backgroundColor: colors.card,
-    borderRadius: 20,
-    marginHorizontal: 20,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
+    borderRadius: borderRadius.xl,
+    ...shadows.md,
   },
-  periodCardGradient: {
-    padding: 20,
+  periodCardContent: {
+    padding: spacing[20],
   },
   periodHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing[16],
   },
   periodMonth: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...typography.h4,
     color: colors.text,
   },
   periodTotal: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...typography.currency,
     color: colors.primary.main,
   },
   periodDetails: {
-    gap: 14,
-    marginBottom: 8,
+    gap: spacing[12],
+    marginBottom: spacing[16],
   },
   periodDetail: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[12],
   },
-  periodDetailIcon: {
-    fontSize: 22,
-    marginRight: 12,
+  periodDetailIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  electricityIconBg: {
+    backgroundColor: colors.warningLight,
+  },
+  waterIconBg: {
+    backgroundColor: colors.infoLight,
+  },
+  periodDetailTextContainer: {
+    flex: 1,
   },
   periodDetailLabel: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textMuted,
-    fontWeight: '500',
   },
   periodDetailValue: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.text,
     fontWeight: '600',
+    marginTop: spacing[1],
+  },
+  periodFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[6],
+    paddingTop: spacing[12],
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
   },
   tapHint: {
-    fontSize: 11,
+    ...typography.caption,
     color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: 12,
+  },
+  tapHintDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.textMuted,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    padding: spacing[24],
     width: '85%',
     maxWidth: 340,
+    ...shadows.xl,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
+    ...typography.h3,
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: spacing[20],
   },
   modalLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-    marginBottom: 8,
+    ...typography.label,
+    color: colors.textSecondary,
+    marginBottom: spacing[8],
   },
   monthScroll: {
-    marginBottom: 16,
+    marginBottom: spacing[16],
   },
   monthButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    marginRight: 8,
+    paddingHorizontal: spacing[14],
+    paddingVertical: spacing[10],
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
+    marginRight: spacing[8],
   },
   monthButtonActive: {
-    backgroundColor: '#2196F3',
+    backgroundColor: colors.primary.main,
   },
   monthButtonText: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   monthButtonTextActive: {
-    color: '#fff',
+    color: colors.common.white,
   },
   yearSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 20,
-    marginBottom: 24,
+    gap: spacing[20],
+    marginBottom: spacing[24],
   },
   yearButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   yearButtonText: {
-    fontSize: 24,
-    color: '#333',
+    ...typography.h3,
+    color: colors.text,
   },
   yearText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
+    ...typography.h2,
+    color: colors.text,
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing[12],
   },
   modalCancelButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#f0f0f0',
+    paddingVertical: spacing[14],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
   },
   modalCancelText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '600',
+    ...typography.button,
+    color: colors.textSecondary,
   },
   modalConfirmButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#2196F3',
+    paddingVertical: spacing[14],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary.main,
     alignItems: 'center',
   },
   modalConfirmText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
+    ...typography.button,
+    color: colors.common.white,
   },
 });
 

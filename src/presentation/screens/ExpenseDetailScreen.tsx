@@ -19,20 +19,23 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { Lightning, Drop, House, Camera, FileText, Calculator, Export, Check, X, Trash, CaretRight } from 'phosphor-react-native';
 import { ExpensePeriod, ExpenseSettings, FloorElectricityReading, FloorWaterCost, ReceiptPhoto } from '../../domain/entities/Expense';
 import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
 import { getDatabase } from '../../data/Database';
 import { getSavedGroupCode, savePeriodToCloud, getPeriodsFromCloud, getGroupSettings } from '../../services/SyncService';
-import { colors } from '../theme/colors';
+import { colors, spacing, borderRadius, shadows } from '../theme/colors';
+import { typography } from '../theme/typography';
 import { storage } from '../../services/firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { DecimalInput } from '../components/DecimalInput';
 import { formatCurrency } from '../../utils/formatting';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type ExpenseDetailRouteParams = {
   ExpenseDetail: {
@@ -63,7 +66,11 @@ const ExpenseDetailScreen: React.FC = () => {
     type: 'image',
   });
   const [uploadingImage, setUploadingImage] = useState(false);
-  
+  const [deleteReceiptDialogVisible, setDeleteReceiptDialogVisible] = useState(false);
+  const [deleteReceiptType, setDeleteReceiptType] = useState<'electricity' | 'water'>('electricity');
+  const [feedbackDialogVisible, setFeedbackDialogVisible] = useState(false);
+  const [feedbackData, setFeedbackData] = useState<{ title: string; message: string; variant: 'success' | 'info' } | null>(null);
+
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -90,7 +97,7 @@ const ExpenseDetailScreen: React.FC = () => {
     try {
       let periodId = route.params.periodId;
       const code = await getSavedGroupCode();
-      
+
       if (periodId === 'latest' || periodId === 'current') {
         if (code) {
           const periods = await getPeriodsFromCloud(code);
@@ -113,7 +120,7 @@ const ExpenseDetailScreen: React.FC = () => {
           }
         }
       }
-      
+
       if (code) {
         const periods = await getPeriodsFromCloud(code);
         const periodData = periods.find(p => p.id === periodId);
@@ -121,7 +128,7 @@ const ExpenseDetailScreen: React.FC = () => {
           setPeriod(periodData);
           setTotalReceiptElectricity(periodData.electricity.totalReceipt.toString());
           setTotalReceiptWater(periodData.water.totalReceipt.toString());
-          
+
           const readings: Record<string, { previous: string; current: string }> = {};
           periodData.floorsElectricity.forEach(f => {
             readings[f.floorId] = {
@@ -130,13 +137,13 @@ const ExpenseDetailScreen: React.FC = () => {
             };
           });
           setFloorReadings(readings);
-          
+
           const floorsPaying = new Set<string>();
           periodData.floorsElectricity.forEach(f => {
             if (f.paysSurplus) floorsPaying.add(f.floorId);
           });
           setFloorsPayingSurplus(floorsPaying);
-          
+
           if (periodData.savedSettings) {
             setSettings(periodData.savedSettings);
           } else {
@@ -149,12 +156,12 @@ const ExpenseDetailScreen: React.FC = () => {
       } else {
         const repo = new SQLiteExpenseRepository(getDatabase());
         const periodData = await repo.getPeriodById(periodId);
-        
+
         if (periodData) {
           setPeriod(periodData);
           setTotalReceiptElectricity(periodData.electricity.totalReceipt.toString());
           setTotalReceiptWater(periodData.water.totalReceipt.toString());
-          
+
           const readings: Record<string, { previous: string; current: string }> = {};
           periodData.floorsElectricity.forEach(f => {
             readings[f.floorId] = {
@@ -163,7 +170,7 @@ const ExpenseDetailScreen: React.FC = () => {
             };
           });
           setFloorReadings(readings);
-          
+
           if (periodData.savedSettings) {
             setSettings(periodData.savedSettings);
           } else {
@@ -180,7 +187,7 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const updateFloorReading = (floorId: string, field: 'previousReading' | 'currentReading', value: string) => {
     if (!period || !settings) return;
-    
+
     setFloorReadings(prev => ({
       ...prev,
       [floorId]: {
@@ -188,14 +195,14 @@ const ExpenseDetailScreen: React.FC = () => {
         [field === 'previousReading' ? 'previous' : 'current']: value,
       },
     }));
-    
+
     const numValue = parseFloat(value) || 0;
     const floor = settings.floors.find(f => f.id === floorId);
     if (!floor) return;
 
     const existingFloorIndex = period.floorsElectricity.findIndex(f => f.floorId === floorId);
     const existingFloor = existingFloorIndex >= 0 ? period.floorsElectricity[existingFloorIndex] : null;
-    
+
     const previousReading = field === 'previousReading' ? numValue : (existingFloor?.previousReading || 0);
     const currentReading = field === 'currentReading' ? numValue : (existingFloor?.currentReading || 0);
     const currentSurplus = existingFloor?.surplus || 0;
@@ -248,9 +255,9 @@ const ExpenseDetailScreen: React.FC = () => {
       const floorConfig = settings.floors.find(fl => fl.id === f.floorId);
       const floorIgvPercentage = floorConfig?.igvPercentage ?? settings.igvPercentage ?? 18;
       const floorFixedCharge = floorConfig?.fixedCharge ?? 0;
-      
+
       const igv = f.consumptionPrice * (floorIgvPercentage / 100);
-      
+
       return {
         ...f,
         igv,
@@ -266,7 +273,6 @@ const ExpenseDetailScreen: React.FC = () => {
     const receiptTotal = parseFloat(totalReceiptElectricity) || 0;
     const surplus = receiptTotal - totalFromMeters;
 
-    // Distribuir excedente entre pisos que pagan (con redondeo controlado)
     const payingFloors = Array.from(floorsPayingSurplus);
     const payingCount = payingFloors.length;
     let distributedSum = 0;
@@ -294,14 +300,14 @@ const ExpenseDetailScreen: React.FC = () => {
     const waterReceiptTotal = parseFloat(totalReceiptWater) || 0;
     const totalFixedAmount = settings.floors.reduce((sum, f) => sum + (f.waterFixedAmount || 0), 0);
     const remainingAfterFixed = Math.max(0, waterReceiptTotal - totalFixedAmount);
-    
+
     const floorsWithPercentage = settings.floors.filter(f => (f.waterPercentage || 0) > 0);
     const totalPercentage = floorsWithPercentage.reduce((sum, f) => sum + (f.waterPercentage || 0), 0);
-    
+
     const floorsWater: FloorWaterCost[] = settings.floors.map(floor => {
       const fixedAmount = floor.waterFixedAmount || 0;
       let amountFromPercentage = 0;
-      
+
       if (floor.waterPercentage && floor.waterPercentage > 0 && totalPercentage > 0) {
         amountFromPercentage = remainingAfterFixed * (floor.waterPercentage / totalPercentage);
       } else if (totalPercentage === 0 && fixedAmount === 0) {
@@ -310,7 +316,7 @@ const ExpenseDetailScreen: React.FC = () => {
           amountFromPercentage = remainingAfterFixed / floorsWithoutPercentage.length;
         }
       }
-      
+
       return {
         floorId: floor.id,
         floorName: floor.name,
@@ -340,10 +346,12 @@ const ExpenseDetailScreen: React.FC = () => {
     const totalToPayFinal = updatedFloorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);
     const totalWaterToPay = floorsWater.reduce((sum, f) => sum + f.amount, 0);
 
-    Alert.alert(
-      'Cálculo completado',
-      `⚡ ELECTRICIDAD:\nTotal medidores: S/ ${totalFromMeters.toFixed(2)}\nTotal recibo: S/ ${receiptTotal.toFixed(2)}\nExcedente: S/ ${surplus.toFixed(2)}\n\n💧 AGUA:\nTotal recibo: S/ ${waterReceiptTotal.toFixed(2)}\nDistribuido: S/ ${totalWaterToPay.toFixed(2)}`
-    );
+    setFeedbackData({
+      title: 'Cálculo completado',
+      message: `ELECTRICIDAD:\nTotal medidores: ${formatCurrency(totalFromMeters)}\nTotal recibo: ${formatCurrency(receiptTotal)}\nExcedente: ${formatCurrency(surplus)}\n\nAGUA:\nTotal recibo: ${formatCurrency(waterReceiptTotal)}\nDistribuido: ${formatCurrency(totalWaterToPay)}`,
+      variant: 'success',
+    });
+    setFeedbackDialogVisible(true);
   };
 
   const toggleFloorSurplusPayment = (floorId: string) => {
@@ -363,9 +371,7 @@ const ExpenseDetailScreen: React.FC = () => {
     if (!period || saving) return;
     setSaving(true);
     setHasChanges(false);
-    Alert.alert('Guardado', 'Datos actualizados correctamente');
-    console.log(`${LOG_PREFIX} savePeriod - alert mostrado`);
-    
+
     try {
       if (groupCode) {
         console.log(`${LOG_PREFIX} savePeriod - guardando en cloud`);
@@ -378,8 +384,13 @@ const ExpenseDetailScreen: React.FC = () => {
         console.log(`${LOG_PREFIX} savePeriod - local ok`);
       }
       console.log(`${LOG_PREFIX} savePeriod - éxito`);
+      setFeedbackData({ title: 'Guardado', message: 'Datos actualizados correctamente', variant: 'success' });
+      setFeedbackDialogVisible(true);
     } catch (error) {
       console.error(`${LOG_PREFIX} savePeriod - error:`, error);
+      setHasChanges(true);
+      setFeedbackData({ title: 'Error', message: 'No se pudieron guardar los datos', variant: 'info' });
+      setFeedbackDialogVisible(true);
     } finally {
       setSaving(false);
     }
@@ -394,7 +405,7 @@ const ExpenseDetailScreen: React.FC = () => {
       const grandTotal = totalElectricity + totalWater;
 
       const csvLines: string[] = [];
-      
+
       csvLines.push('═══════════════════════════════════════════════════════════════');
       csvLines.push(`              CASA BALANCE - REPORTE DE GASTOS`);
       csvLines.push('═══════════════════════════════════════════════════════════════');
@@ -402,13 +413,13 @@ const ExpenseDetailScreen: React.FC = () => {
       csvLines.push(`Período: ${period.monthName.toUpperCase()} ${period.year}`);
       csvLines.push(`Generado: ${new Date().toLocaleDateString('es-PE')}`);
       csvLines.push('');
-      
+
       csvLines.push('───────────────────────────────────────────────────────────────');
-      csvLines.push('                    ⚡ ELECTRICIDAD');
+      csvLines.push('                    ELECTRICIDAD');
       csvLines.push('───────────────────────────────────────────────────────────────');
       csvLines.push('');
       csvLines.push('Piso,Lect. Anterior,Lect. Actual,kWh,Consumo,IGV,Cargo Fijo,Excedente,TOTAL');
-      
+
       period.floorsElectricity.forEach(floor => {
         csvLines.push([
           floor.floorName,
@@ -422,20 +433,20 @@ const ExpenseDetailScreen: React.FC = () => {
           `S/ ${floor.totalToPay.toFixed(2)}`
         ].join(','));
       });
-      
+
       csvLines.push('');
       csvLines.push(`Total Recibo Luz:,,,S/ ${period.electricity.totalReceipt.toFixed(2)}`);
       csvLines.push(`Total Medidores:,,,S/ ${period.electricity.totalFromMeters.toFixed(2)}`);
       csvLines.push(`Excedente:,,,S/ ${period.electricity.surplus.toFixed(2)}`);
       csvLines.push(`TOTAL ELECTRICIDAD:,,,S/ ${totalElectricity.toFixed(2)}`);
       csvLines.push('');
-      
+
       csvLines.push('───────────────────────────────────────────────────────────────');
-      csvLines.push('                       💧 AGUA');
+      csvLines.push('                       AGUA');
       csvLines.push('───────────────────────────────────────────────────────────────');
       csvLines.push('');
       csvLines.push('Piso,Monto Fijo,Porcentaje,TOTAL');
-      
+
       period.floorsWater.forEach(floor => {
         csvLines.push([
           floor.floorName,
@@ -444,18 +455,18 @@ const ExpenseDetailScreen: React.FC = () => {
           `S/ ${floor.amount.toFixed(2)}`
         ].join(','));
       });
-      
+
       csvLines.push('');
       csvLines.push(`Total Recibo Agua:,,,S/ ${period.water.totalReceipt.toFixed(2)}`);
       csvLines.push(`TOTAL AGUA:,,,S/ ${totalWater.toFixed(2)}`);
       csvLines.push('');
-      
+
       csvLines.push('═══════════════════════════════════════════════════════════════');
-      csvLines.push('                    💰 RESUMEN POR PISO');
+      csvLines.push('                    RESUMEN POR PISO');
       csvLines.push('═══════════════════════════════════════════════════════════════');
       csvLines.push('');
       csvLines.push('Piso,Luz,Agua,TOTAL A PAGAR');
-      
+
       settings.floors.forEach(floor => {
         const elecFloor = period.floorsElectricity.find(f => f.floorId === floor.id);
         const waterFloor = period.floorsWater.find(f => f.floorId === floor.id);
@@ -468,12 +479,12 @@ const ExpenseDetailScreen: React.FC = () => {
           `S/ ${(elec + water).toFixed(2)}`
         ].join(','));
       });
-      
+
       csvLines.push('');
       csvLines.push('═══════════════════════════════════════════════════════════════');
       csvLines.push(`TOTAL GENERAL A PAGAR:,,,S/ ${grandTotal.toFixed(2)}`);
       csvLines.push('═══════════════════════════════════════════════════════════════');
-      
+
       const csv = csvLines.join('\n');
       const fileName = `Gastos_${period.monthName}_${period.year}.csv`;
       const filePath = FileSystem.documentDirectory + fileName;
@@ -497,7 +508,7 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const pickReceiptImage = async (type: 'electricity' | 'water') => {
     if (!period) return;
-    
+
     Alert.alert(
       'Seleccionar recibo',
       '¿Desde dónde quieres obtener el recibo?',
@@ -524,7 +535,7 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const takePhoto = async (type: 'electricity' | 'water') => {
     if (!period) return;
-    
+
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissionResult.granted) {
       Alert.alert('Permiso necesario', 'Se necesita acceso a la cámara para tomar fotos.');
@@ -550,7 +561,7 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const pickFromGallery = async (type: 'electricity' | 'water') => {
     if (!period) return;
-    
+
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissionResult.granted) {
       Alert.alert('Permiso necesario', 'Se necesita acceso a la galería para seleccionar fotos.');
@@ -576,7 +587,7 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const pickPDF = async (type: 'electricity' | 'water') => {
     if (!period) return;
-    
+
     const result = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
       copyToCacheDirectory: true,
@@ -600,16 +611,16 @@ const ExpenseDetailScreen: React.FC = () => {
 
       if (groupCode && photo.type === 'image') {
         setUploadingImage(true);
-        
+
         const storageRef = ref(storage, `families/${groupCode}/expenses/${period.id}/${type}/receipt_${Date.now()}.jpg`);
-        
+
         const response = await fetch(photo.uri);
         const blob = await response.blob();
-        
+
         const metadata = {
           contentType: 'image/jpeg',
         };
-        
+
         await uploadBytes(storageRef, blob, metadata);
         photoUrl = await getDownloadURL(storageRef);
       }
@@ -647,30 +658,23 @@ const ExpenseDetailScreen: React.FC = () => {
 
   const removeReceiptPhoto = (type: 'electricity' | 'water') => {
     if (!period) return;
+    setDeleteReceiptType(type);
+    setDeleteReceiptDialogVisible(true);
+  };
 
-    Alert.alert(
-      'Eliminar recibo',
-      '¿Estás seguro de eliminar este recibo?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => {
-            const updatedPeriod = {
-              ...period,
-              [type === 'electricity' ? 'electricity' : 'water']: {
-                ...period[type === 'electricity' ? 'electricity' : 'water'],
-                receiptPhoto: undefined,
-              },
-              updatedAt: new Date(),
-            };
-            setPeriod(updatedPeriod);
-            setHasChanges(true);
-          },
-        },
-      ]
-    );
+  const confirmDeleteReceipt = () => {
+    if (!period) return;
+    const updatedPeriod = {
+      ...period,
+      [deleteReceiptType === 'electricity' ? 'electricity' : 'water']: {
+        ...period[deleteReceiptType === 'electricity' ? 'electricity' : 'water'],
+        receiptPhoto: undefined,
+      },
+      updatedAt: new Date(),
+    };
+    setPeriod(updatedPeriod);
+    setHasChanges(true);
+    setDeleteReceiptDialogVisible(false);
   };
 
   const viewReceipt = (photo: ReceiptPhoto) => {
@@ -687,7 +691,8 @@ const ExpenseDetailScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Cargando...</Text>
+        <ActivityIndicator size="large" color={colors.primary.main} />
+        <Text style={styles.loadingText}>Cargando datos...</Text>
       </View>
     );
   }
@@ -696,7 +701,9 @@ const ExpenseDetailScreen: React.FC = () => {
     return (
       <View style={styles.container}>
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📋</Text>
+          <View style={styles.emptyIconContainer}>
+            <Lightning size={48} color={colors.textMuted} weight="thin" />
+          </View>
           <Text style={styles.emptyTitle}>Sin datos</Text>
           <Text style={styles.emptyText}>
             No hay registros de luz y agua aún.{'\n'}
@@ -710,7 +717,8 @@ const ExpenseDetailScreen: React.FC = () => {
   if (!period || !settings) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Cargando...</Text>
+        <ActivityIndicator size="large" color={colors.primary.main} />
+        <Text style={styles.loadingText}>Cargando datos...</Text>
       </View>
     );
   }
@@ -719,23 +727,45 @@ const ExpenseDetailScreen: React.FC = () => {
   const totalWaterToPay = period.floorsWater.reduce((sum, f) => sum + f.amount, 0);
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : spacing[20]}
     >
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f7fa" />
-      <ScrollView 
-        style={styles.scrollView} 
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary.dark} />
+      <LinearGradient colors={[colors.primary.dark, colors.primary.main]} style={styles.header}>
+        <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+              <CaretRight size={18} color={colors.common.white} weight="bold" style={{ transform: [{ rotate: '180deg' }] }} />
+            </TouchableOpacity>
+            <Lightning size={22} color={colors.common.white} weight="fill" />
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle} numberOfLines={1}>{period.monthName} {period.year}</Text>
+              <Text style={styles.headerSubtitle}>Detalle de gastos</Text>
+            </View>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>⚡ Electricidad - Lecturas por Piso</Text>
-          <Text style={styles.sectionSubtitle}>
-            Tarifa: S/ {settings.electricityTariffPerKwh}/kWh | IGV: {settings.igvPercentage}%
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <Lightning size={20} color={colors.accent.orange} weight="fill" />
+              <Text style={styles.sectionTitle} numberOfLines={1}>Electricidad - Lecturas por Piso</Text>
+            </View>
+            <TouchableOpacity style={styles.calculateButtonSmall} onPress={calculateAll}>
+              <Calculator size={16} color={colors.primary.main} weight="bold" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.sectionSubtitle} numberOfLines={2}>
+            Tarifa: S/ {settings.electricityTariffPerKwh}/kWh  ·  IGV: {settings.igvPercentage}%
           </Text>
-          
+
           {settings.floors.filter(f => f.hasElectricityMeter).map(floor => {
             const floorData = period.floorsElectricity.find(f => f.floorId === floor.id) || {
               floorId: floor.id,
@@ -757,8 +787,11 @@ const ExpenseDetailScreen: React.FC = () => {
 
             return (
               <View key={floor.id} style={styles.floorCard}>
-                <Text style={styles.floorName}>🏠 {floor.name}</Text>
-                
+                <View style={styles.floorCardHeader}>
+                  <House size={16} color={colors.textSecondary} weight="duotone" />
+                  <Text style={styles.floorName} numberOfLines={1}>{floor.name}</Text>
+                </View>
+
                 <View style={styles.readingRow}>
                   <View style={styles.readingInput}>
                     <Text style={styles.readingLabel}>Lect. Anterior</Text>
@@ -782,13 +815,15 @@ const ExpenseDetailScreen: React.FC = () => {
 
                 <View style={styles.resultGrid}>
                   <View style={styles.resultItem}>
-                    <Text style={styles.resultLabel}>Real</Text>
+                    <Text style={styles.resultLabel}>Consumo</Text>
                     <Text style={styles.resultValue}>{floorData.realReading.toFixed(1)} kWh</Text>
                   </View>
+                  <View style={styles.resultDivider} />
                   <View style={styles.resultItem}>
-                    <Text style={styles.resultLabel}>Consumo</Text>
+                    <Text style={styles.resultLabel}>Costo</Text>
                     <Text style={styles.resultValue}>{formatCurrency(floorData.consumptionPrice)}</Text>
                   </View>
+                  <View style={styles.resultDivider} />
                   <View style={styles.resultItem}>
                     <Text style={styles.resultLabel}>IGV</Text>
                     <Text style={styles.resultValue}>{formatCurrency(floorData.igv)}</Text>
@@ -797,29 +832,35 @@ const ExpenseDetailScreen: React.FC = () => {
 
                 {(floorData.fixedCharge > 0) && (
                   <View style={styles.fixedChargeRow}>
-                    <Text style={styles.fixedChargeLabel}>Cargo fijo:</Text>
+                    <Text style={styles.fixedChargeLabel}>Cargo fijo</Text>
                     <Text style={styles.fixedChargeValue}>{formatCurrency(floorData.fixedCharge)}</Text>
                   </View>
                 )}
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[
                     styles.surplusToggle,
                     floorsPayingSurplus.has(floor.id) && styles.surplusToggleActive
                   ]}
                   onPress={() => toggleFloorSurplusPayment(floor.id)}
+                  activeOpacity={0.7}
                 >
+                  {floorsPayingSurplus.has(floor.id) ? (
+                    <Check size={14} color={colors.primary.main} weight="bold" />
+                  ) : (
+                    <View style={styles.surplusCheckEmpty} />
+                  )}
                   <Text style={[
                     styles.surplusToggleText,
                     floorsPayingSurplus.has(floor.id) && styles.surplusToggleTextActive
                   ]}>
-                    {floorsPayingSurplus.has(floor.id) ? '✓ Paga excedente' : 'No paga excedente'}
+                    {floorsPayingSurplus.has(floor.id) ? 'Paga excedente' : 'No paga excedente'}
                   </Text>
                 </TouchableOpacity>
 
                 {floorData.surplus > 0 && (
                   <View style={styles.surplusRow}>
-                    <Text style={styles.surplusLabel}>Excedente asignado:</Text>
+                    <Text style={styles.surplusLabel}>Excedente</Text>
                     <Text style={styles.surplusValue}>{formatCurrency(floorData.surplus)}</Text>
                   </View>
                 )}
@@ -835,17 +876,21 @@ const ExpenseDetailScreen: React.FC = () => {
 
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>⚡ Luz</Text>
-            <TouchableOpacity 
+            <View style={styles.sectionTitleRow}>
+              <Lightning size={20} color={colors.accent.orange} weight="fill" />
+              <Text style={styles.sectionTitle} numberOfLines={1}>Luz</Text>
+            </View>
+            <TouchableOpacity
               style={[styles.receiptButton, uploadingImage && styles.receiptButtonDisabled]}
               onPress={() => pickReceiptImage('electricity')}
               disabled={uploadingImage}
+              activeOpacity={0.7}
             >
               {uploadingImage ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={colors.textInverse} />
               ) : (
                 <>
-                  <Text style={styles.receiptButtonIcon}>📸</Text>
+                  <Camera size={14} color={colors.textInverse} weight="fill" />
                   <Text style={styles.receiptButtonText}>
                     {period.electricity.receiptPhoto ? 'Cambiar' : 'Recibo'}
                   </Text>
@@ -853,33 +898,34 @@ const ExpenseDetailScreen: React.FC = () => {
               )}
             </TouchableOpacity>
           </View>
-          
+
           {period.electricity.receiptPhoto && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.receiptPreview}
               onPress={() => viewReceipt(period.electricity.receiptPhoto!)}
               onLongPress={() => removeReceiptPhoto('electricity')}
+              activeOpacity={0.8}
             >
               {period.electricity.receiptPhoto.type === 'image' ? (
-                <Image 
-                  source={{ uri: period.electricity.receiptPhoto.uri }} 
+                <Image
+                  source={{ uri: period.electricity.receiptPhoto.uri }}
                   style={styles.receiptImage}
                 />
               ) : (
                 <View style={styles.pdfPreview}>
-                  <Text style={styles.pdfIcon}>📄</Text>
+                  <FileText size={32} color={colors.accent.red} weight="duotone" />
                   <Text style={styles.pdfName} numberOfLines={1}>
                     {period.electricity.receiptPhoto.name}
                   </Text>
                 </View>
               )}
-              <Text style={styles.receiptHint}>Toca para ver • Mantén para eliminar</Text>
+              <Text style={styles.receiptHint}>Toca para ver · Mantén para eliminar</Text>
             </TouchableOpacity>
           )}
-          
+
           <View style={styles.summaryCard}>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Total Recibo Luz:</Text>
+              <Text style={styles.summaryLabel}>Total Recibo Luz</Text>
               <DecimalInput
                 style={styles.summaryInput}
                 value={totalReceiptElectricity}
@@ -888,14 +934,15 @@ const ExpenseDetailScreen: React.FC = () => {
                 showDotButton={true}
               />
             </View>
+            <View style={styles.summaryDivider} />
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Total Medidores:</Text>
+              <Text style={styles.summaryLabel}>Total Medidores</Text>
               <Text style={styles.summaryValue}>
                 {formatCurrency(period.floorsElectricity.reduce((sum, f) => sum + f.consumptionPrice + f.igv, 0))}
               </Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Excedente:</Text>
+              <Text style={styles.summaryLabel}>Excedente</Text>
               <Text style={[styles.summaryValue, period.electricity.surplus > 0 && styles.surplusPositive]}>
                 {formatCurrency(period.electricity.surplus)}
               </Text>
@@ -903,7 +950,7 @@ const ExpenseDetailScreen: React.FC = () => {
             {floorsPayingSurplus.size > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabelSmall}>
-                  Pisos que pagan excedente: {floorsPayingSurplus.size}
+                  Pagan excedente: {floorsPayingSurplus.size}
                 </Text>
                 <Text style={styles.summaryLabelSmall}>
                   S/ {(period.electricity.surplus / floorsPayingSurplus.size).toFixed(2)} c/u
@@ -912,7 +959,7 @@ const ExpenseDetailScreen: React.FC = () => {
             )}
             <View style={styles.summaryDivider} />
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabelBold}>Total a Cobrar:</Text>
+              <Text style={styles.summaryLabelBold}>Total a Cobrar</Text>
               <Text style={styles.summaryValueBold}>{formatCurrency(totalElectricityToPay)}</Text>
             </View>
           </View>
@@ -920,20 +967,24 @@ const ExpenseDetailScreen: React.FC = () => {
 
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionTitle}>💧 Agua</Text>
-              <Text style={styles.sectionSubtitle}>Montos fijos + porcentajes del resto</Text>
+            <View style={styles.sectionTitleRow}>
+              <Drop size={20} color={colors.accent.blue} weight="fill" />
+              <View>
+                <Text style={styles.sectionTitle}>Agua</Text>
+                <Text style={styles.sectionSubtitle} numberOfLines={2}>Montos fijos + porcentajes del resto</Text>
+              </View>
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.receiptButton, uploadingImage && styles.receiptButtonDisabled]}
               onPress={() => pickReceiptImage('water')}
               disabled={uploadingImage}
+              activeOpacity={0.7}
             >
               {uploadingImage ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={colors.textInverse} />
               ) : (
                 <>
-                  <Text style={styles.receiptButtonIcon}>📸</Text>
+                  <Camera size={14} color={colors.textInverse} weight="fill" />
                   <Text style={styles.receiptButtonText}>
                     {period.water.receiptPhoto ? 'Cambiar' : 'Recibo'}
                   </Text>
@@ -941,33 +992,34 @@ const ExpenseDetailScreen: React.FC = () => {
               )}
             </TouchableOpacity>
           </View>
-          
+
           {period.water.receiptPhoto && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.receiptPreview}
               onPress={() => viewReceipt(period.water.receiptPhoto!)}
               onLongPress={() => removeReceiptPhoto('water')}
+              activeOpacity={0.8}
             >
               {period.water.receiptPhoto.type === 'image' ? (
-                <Image 
-                  source={{ uri: period.water.receiptPhoto.uri }} 
+                <Image
+                  source={{ uri: period.water.receiptPhoto.uri }}
                   style={styles.receiptImage}
                 />
               ) : (
                 <View style={styles.pdfPreview}>
-                  <Text style={styles.pdfIcon}>📄</Text>
+                  <FileText size={32} color={colors.accent.red} weight="duotone" />
                   <Text style={styles.pdfName} numberOfLines={1}>
                     {period.water.receiptPhoto.name}
                   </Text>
                 </View>
               )}
-              <Text style={styles.receiptHint}>Toca para ver • Mantén para eliminar</Text>
+              <Text style={styles.receiptHint}>Toca para ver · Mantén para eliminar</Text>
             </TouchableOpacity>
           )}
-          
+
           <View style={styles.waterCard}>
             <View style={styles.waterTotalRow}>
-              <Text style={styles.waterTotalLabel}>Total Recibo Agua:</Text>
+              <Text style={styles.waterTotalLabel}>Total Recibo Agua</Text>
               <DecimalInput
                 style={styles.waterTotalInput}
                 value={totalReceiptWater}
@@ -980,23 +1032,31 @@ const ExpenseDetailScreen: React.FC = () => {
             {period.floorsWater.length > 0 ? (
               period.floorsWater.map(floor => (
                 <View key={floor.floorId} style={styles.waterFloorRow}>
-                  <Text style={styles.waterFloorName}>🏠 {floor.floorName}</Text>
-                  {floor.fixedAmount > 0 ? (
-                    <Text style={styles.waterFloorFixed}>Fijo: S/ {floor.fixedAmount.toFixed(0)}</Text>
-                  ) : null}
-                  {floor.percentage > 0 ? (
-                    <Text style={styles.waterFloorPercent}>{floor.percentage}%</Text>
-                  ) : null}
-                  <Text style={styles.waterFloorAmount}>{formatCurrency(floor.amount)}</Text>
+                  <View style={styles.waterFloorLeft}>
+                    <House size={14} color={colors.textMuted} weight="duotone" />
+                    <Text style={styles.waterFloorName}>{floor.floorName}</Text>
+                  </View>
+                  <View style={styles.waterFloorRight}>
+                    {floor.fixedAmount > 0 ? (
+                      <Text style={styles.waterFloorFixed}>Fijo: S/ {floor.fixedAmount.toFixed(0)}</Text>
+                    ) : null}
+                    {floor.percentage > 0 ? (
+                      <Text style={styles.waterFloorPercent}>{floor.percentage}%</Text>
+                    ) : null}
+                    <Text style={styles.waterFloorAmount}>{formatCurrency(floor.amount)}</Text>
+                  </View>
                 </View>
               ))
             ) : (
-              <Text style={styles.waterHint}>Presiona "Calcular" para distribuir</Text>
+              <View style={styles.waterHintContainer}>
+                <Drop size={20} color={colors.textMuted} weight="thin" />
+                <Text style={styles.waterHint}>Presiona "Calcular" para distribuir</Text>
+              </View>
             )}
 
             {period.floorsWater.length > 0 && (
               <View style={styles.waterTotalSummary}>
-                <Text style={styles.waterTotalSummaryLabel}>TOTAL:</Text>
+                <Text style={styles.waterTotalSummaryLabel}>TOTAL</Text>
                 <Text style={styles.waterTotalSummaryValue}>{formatCurrency(totalWaterToPay)}</Text>
               </View>
             )}
@@ -1004,9 +1064,12 @@ const ExpenseDetailScreen: React.FC = () => {
         </Animated.View>
 
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>💰 Total por Piso</Text>
-          <Text style={styles.sectionSubtitle}>Resumen de Luz + Agua</Text>
-          
+          <View style={styles.sectionTitleRow}>
+            <Lightning size={20} color={colors.primary.main} weight="duotone" />
+            <Text style={styles.sectionTitle} numberOfLines={1}>Total por Piso</Text>
+          </View>
+          <Text style={styles.sectionSubtitle} numberOfLines={2}>Resumen de Luz + Agua</Text>
+
           <View style={styles.totalByFloorCard}>
             {settings?.floors.map(floor => {
               const electricityFloor = period.floorsElectricity.find(f => f.floorId === floor.id);
@@ -1014,19 +1077,28 @@ const ExpenseDetailScreen: React.FC = () => {
               const electricityAmount = electricityFloor?.totalToPay || 0;
               const waterAmount = waterFloor?.amount || 0;
               const totalAmount = electricityAmount + waterAmount;
-              
+
               return (
                 <View key={floor.id} style={styles.totalByFloorRow}>
-                  <Text style={styles.totalByFloorName}>🏠 {floor.name}</Text>
+                  <View style={styles.totalByFloorLeft}>
+                    <House size={14} color={colors.textMuted} weight="duotone" />
+                    <Text style={styles.totalByFloorName}>{floor.name}</Text>
+                  </View>
                   <View style={styles.totalByFloorDetails}>
-                    <Text style={styles.totalByFloorDetail}>Luz: {formatCurrency(electricityAmount)}</Text>
-                    <Text style={styles.totalByFloorDetail}>Agua: {formatCurrency(waterAmount)}</Text>
+                    <View style={styles.totalByFloorTag}>
+                      <Lightning size={10} color={colors.accent.orange} weight="fill" />
+                      <Text style={styles.totalByFloorDetail}>{formatCurrency(electricityAmount)}</Text>
+                    </View>
+                    <View style={styles.totalByFloorTag}>
+                      <Drop size={10} color={colors.accent.blue} weight="fill" />
+                      <Text style={styles.totalByFloorDetail}>{formatCurrency(waterAmount)}</Text>
+                    </View>
                   </View>
                   <Text style={styles.totalByFloorTotal}>{formatCurrency(totalAmount)}</Text>
                 </View>
               );
             })}
-            
+
             <View style={styles.grandTotalRow}>
               <Text style={styles.grandTotalLabel}>TOTAL GENERAL</Text>
               <Text style={styles.grandTotalValue}>
@@ -1039,36 +1111,46 @@ const ExpenseDetailScreen: React.FC = () => {
           </View>
         </Animated.View>
 
-        <TouchableOpacity style={styles.calculateButton} onPress={calculateAll}>
+        <TouchableOpacity style={styles.calculateButton} onPress={calculateAll} activeOpacity={0.8}>
           <LinearGradient
-            colors={['#FF9800', '#F57C00']}
+            colors={[colors.accent.orange, '#D97706']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
             style={styles.calculateButtonGradient}
           >
-            <Text style={styles.calculateButtonText}>🧮 Calcular Todo</Text>
+            <Calculator size={20} color={colors.textInverse} weight="bold" />
+            <Text style={styles.calculateButtonText}>Calcular Todo</Text>
           </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.exportButton} onPress={exportPeriod}>
-          <Text style={styles.exportButtonText}>📤 Exportar a CSV</Text>
+        <TouchableOpacity style={styles.exportButton} onPress={exportPeriod} activeOpacity={0.7}>
+          <Export size={18} color={colors.textSecondary} weight="bold" />
+          <Text style={styles.exportButtonText}>Exportar a CSV</Text>
         </TouchableOpacity>
 
-        <View style={styles.bottomSpacer} />
+        <View style={{ height: 200 }} />
       </ScrollView>
 
       {hasChanges && (
-        <TouchableOpacity 
-          style={[styles.saveButton, { bottom: 16 + insets.bottom }, saving && styles.saveButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.saveButton, { bottom: spacing[16] + insets.bottom }, saving && styles.saveButtonDisabled]}
           onPress={savePeriod}
           disabled={saving}
+          activeOpacity={0.8}
         >
           <LinearGradient
-            colors={saving ? ['#999', '#777'] : ['#4CAF50', '#388E3C']}
+            colors={saving ? [colors.textMuted, colors.textSecondary] : [colors.primary.main, colors.primary.dark]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
             style={styles.saveButtonGradient}
           >
             {saving ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={colors.textInverse} />
             ) : (
-              <Text style={styles.saveButtonText}>💾 Guardar</Text>
+              <>
+                <Check size={20} color={colors.textInverse} weight="bold" />
+                <Text style={styles.saveButtonText}>Guardar</Text>
+              </>
             )}
           </LinearGradient>
         </TouchableOpacity>
@@ -1080,21 +1162,41 @@ const ExpenseDetailScreen: React.FC = () => {
         animationType="fade"
         onRequestClose={() => setImageModal({ visible: false, uri: '', type: 'image' })}
       >
-        <Pressable 
+        <Pressable
           style={styles.modalOverlay}
           onPress={() => setImageModal({ visible: false, uri: '', type: 'image' })}
         >
           <View style={styles.modalContent}>
             <Image source={{ uri: imageModal.uri }} style={styles.modalImage} resizeMode="contain" />
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setImageModal({ visible: false, uri: '', type: 'image' })}
+              activeOpacity={0.7}
             >
-              <Text style={styles.modalCloseText}>✕</Text>
+              <X size={20} color={colors.textInverse} weight="bold" />
             </TouchableOpacity>
           </View>
         </Pressable>
       </Modal>
+
+      <ConfirmDialog
+        visible={deleteReceiptDialogVisible}
+        title="Eliminar recibo"
+        message="¿Estás seguro de eliminar este recibo?"
+        confirmText="Eliminar"
+        onConfirm={confirmDeleteReceipt}
+        onCancel={() => setDeleteReceiptDialogVisible(false)}
+      />
+
+      <ConfirmDialog
+        visible={feedbackDialogVisible}
+        title={feedbackData?.title || ''}
+        message={feedbackData?.message || ''}
+        variant={feedbackData?.variant || 'success'}
+        showCancel={false}
+        confirmText="Aceptar"
+        onConfirm={() => { setFeedbackDialogVisible(false); setFeedbackData(null); }}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -1104,269 +1206,381 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  header: {
+    paddingBottom: spacing[12],
+  },
+  headerSafeArea: {
+    paddingHorizontal: spacing[16],
+    paddingTop: spacing[6],
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[10],
+  },
+  backBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  headerTitle: {
+    ...typography.h3,
+    color: colors.common.white,
+  },
+  headerSubtitle: {
+    ...typography.caption,
+    color: colors.common.white,
+    opacity: 0.85,
+    marginTop: spacing[2],
+  },
   scrollView: {
     flex: 1,
   },
   loadingText: {
-    fontSize: 16,
+    ...typography.body,
     color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 50,
+    marginTop: spacing[16],
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    padding: spacing[8],
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-    color: colors.textMuted,
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius.xl,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[20],
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    ...typography.h3,
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: spacing[8],
   },
   emptyText: {
-    fontSize: 14,
+    ...typography.bodySmall,
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
   section: {
-    padding: 16,
-    paddingTop: 50,
+    padding: spacing[16],
+    paddingTop: spacing[48],
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing[4],
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.primary.main,
-    marginBottom: 4,
+    ...typography.h4,
+    color: colors.text,
   },
   sectionSubtitle: {
-    fontSize: 13,
+    ...typography.caption,
     color: colors.textMuted,
-    marginBottom: 12,
+    marginBottom: spacing[12],
+    marginLeft: spacing[6],
+  },
+  calculateButtonSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primary.light,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   floorCard: {
     backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    marginBottom: spacing[12],
+    ...shadows.md,
+  },
+  floorCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+    marginBottom: spacing[12],
   },
   floorName: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...typography.label,
     color: colors.text,
-    marginBottom: 10,
   },
   readingRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
+    gap: spacing[8],
+    marginBottom: spacing[12],
   },
   readingInput: {
     flex: 1,
   },
   readingLabel: {
-    fontSize: 11,
-    color: '#666',
-    marginBottom: 4,
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: spacing[4],
   },
   input: {
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 15,
-    color: '#333',
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.sm,
+    padding: spacing[10],
+    ...typography.bodySmall,
+    color: colors.text,
     textAlign: 'center',
   },
   resultGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.sm,
+    padding: spacing[12],
+    marginBottom: spacing[12],
   },
   resultItem: {
+    flex: 1,
     alignItems: 'center',
   },
+  resultDivider: {
+    width: 1,
+    height: spacing[24],
+    backgroundColor: colors.border,
+  },
   resultLabel: {
-    fontSize: 11,
-    color: '#666',
+    ...typography.caption,
+    color: colors.textMuted,
   },
   resultValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 2,
+    ...typography.captionMedium,
+    color: colors.text,
+    marginTop: spacing[2],
   },
   fixedChargeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingHorizontal: 4,
-    backgroundColor: '#fff3e0',
-    borderRadius: 8,
-    padding: 10,
+    marginBottom: spacing[12],
+    backgroundColor: colors.warningLight,
+    borderRadius: borderRadius.sm,
+    padding: spacing[12],
   },
   fixedChargeLabel: {
-    fontSize: 13,
-    color: '#e65100',
+    ...typography.bodySmall,
+    color: colors.warning,
     fontWeight: '500',
   },
   fixedChargeValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#e65100',
+    ...typography.currencySmall,
+    color: colors.warning,
+  },
+  surplusToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[8],
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.sm,
+    padding: spacing[12],
+    marginBottom: spacing[12],
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  surplusToggleActive: {
+    backgroundColor: colors.primary.light,
+    borderColor: colors.primary.main,
+  },
+  surplusCheckEmpty: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 1.5,
+    borderColor: colors.textMuted,
+  },
+  surplusToggleText: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  surplusToggleTextActive: {
+    color: colors.primary.dark,
   },
   surplusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingHorizontal: 4,
+    marginBottom: spacing[12],
+    paddingHorizontal: spacing[4],
   },
   surplusLabel: {
-    fontSize: 13,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   surplusValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#e65100',
-  },
-  surplusToggle: {
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-  },
-  surplusToggleActive: {
-    backgroundColor: '#fff3e0',
-    borderColor: '#ff9800',
-  },
-  surplusToggleText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  surplusToggleTextActive: {
-    color: '#e65100',
+    ...typography.currencySmall,
+    color: colors.warning,
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#e8f5e9',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: colors.successLight,
+    borderRadius: borderRadius.sm,
+    padding: spacing[12],
   },
   totalLabel: {
-    fontSize: 13,
-    color: '#2e7d32',
-    fontWeight: 'bold',
+    ...typography.captionMedium,
+    color: colors.success,
   },
   totalValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2e7d32',
+    ...typography.currency,
+    fontSize: 16,
+    color: colors.success,
+    flexShrink: 1,
+  },
+  receiptButton: {
+    backgroundColor: colors.accent.blue,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+    borderRadius: borderRadius.full,
+    gap: spacing[4],
+  },
+  receiptButtonDisabled: {
+    opacity: 0.6,
+  },
+  receiptButtonText: {
+    ...typography.captionMedium,
+    color: colors.textInverse,
+  },
+  receiptPreview: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing[12],
+    marginBottom: spacing[12],
+    alignItems: 'center',
+    ...shadows.sm,
+  },
+  receiptImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  pdfPreview: {
+    width: '100%',
+    height: 60,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[8],
+  },
+  pdfName: {
+    ...typography.bodySmall,
+    color: colors.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  receiptHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing[8],
   },
   summaryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    elevation: 2,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    ...shadows.sm,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: spacing[8],
   },
   summaryLabel: {
-    fontSize: 14,
-    color: '#666',
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
   summaryLabelSmall: {
-    fontSize: 12,
-    color: '#e65100',
+    ...typography.caption,
+    color: colors.warning,
     fontWeight: '500',
   },
   summaryLabelBold: {
-    fontSize: 15,
-    color: '#333',
-    fontWeight: 'bold',
+    ...typography.bodyMedium,
+    color: colors.text,
   },
   summaryValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
+    ...typography.currencySmall,
+    color: colors.text,
   },
   summaryValueBold: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2196F3',
+    ...typography.currency,
+    color: colors.accent.blue,
   },
   summaryInput: {
-    backgroundColor: '#f5f7fa',
-    borderRadius: 8,
-    padding: 8,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
+    backgroundColor: colors.input.background,
+    borderRadius: borderRadius.sm,
+    padding: spacing[2],
+    ...typography.currencySmall,
+    color: colors.text,
     textAlign: 'right',
     minWidth: 100,
   },
   surplusPositive: {
-    color: '#e65100',
+    color: colors.warning,
   },
   summaryDivider: {
     height: 1,
-    backgroundColor: '#e0e0e0',
-    marginVertical: 8,
+    backgroundColor: colors.divider,
+    marginVertical: spacing[4],
   },
   waterCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    elevation: 2,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    ...shadows.sm,
   },
   waterTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 12,
+    marginBottom: spacing[12],
+    paddingBottom: spacing[12],
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: colors.divider,
   },
   waterTotalLabel: {
-    fontSize: 14,
-    color: '#333',
+    ...typography.bodySmall,
+    color: colors.text,
     fontWeight: '600',
   },
   waterTotalInput: {
-    backgroundColor: '#e3f2fd',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1565C0',
+    backgroundColor: colors.infoLight,
+    borderRadius: borderRadius.sm,
+    padding: spacing[2],
+    ...typography.currencySmall,
+    color: colors.accent.blueDark,
     textAlign: 'right',
     minWidth: 120,
   },
@@ -1374,231 +1588,189 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: spacing[10],
   },
-  waterFloorName: {
-    fontSize: 14,
-    color: '#333',
+  waterFloorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
     flex: 1,
   },
+  waterFloorName: {
+    ...typography.bodySmall,
+    color: colors.text,
+  },
+  waterFloorRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
+  },
   waterFloorFixed: {
-    fontSize: 12,
-    color: '#e65100',
+    ...typography.caption,
+    color: colors.warning,
     fontWeight: '600',
-    marginHorizontal: 4,
   },
   waterFloorPercent: {
-    fontSize: 13,
-    color: '#666',
-    width: 50,
+    ...typography.caption,
+    color: colors.textMuted,
+    width: 40,
     textAlign: 'center',
   },
   waterFloorAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1565C0',
+    ...typography.currencySmall,
+    color: colors.accent.blueDark,
     width: 80,
     textAlign: 'right',
   },
+  waterHintContainer: {
+    alignItems: 'center',
+    paddingVertical: spacing[20],
+    gap: spacing[8],
+  },
   waterHint: {
-    fontSize: 13,
-    color: '#999',
+    ...typography.caption,
+    color: colors.textMuted,
     textAlign: 'center',
-    fontStyle: 'italic',
   },
   waterTotalSummary: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing[12],
+    paddingTop: spacing[12],
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: colors.divider,
   },
   waterTotalSummaryLabel: {
-    fontSize: 15,
-    color: '#333',
-    fontWeight: 'bold',
+    ...typography.bodyMedium,
+    color: colors.text,
   },
   waterTotalSummaryValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1565C0',
+    ...typography.currency,
+    color: colors.accent.blue,
   },
   totalByFloorCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    elevation: 2,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing[16],
+    ...shadows.sm,
   },
   totalByFloorRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: spacing[12],
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: colors.borderLight,
+  },
+  totalByFloorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    flex: 1,
   },
   totalByFloorName: {
-    fontSize: 14,
+    ...typography.bodySmall,
     fontWeight: '600',
-    color: '#333',
-    width: 80,
+    color: colors.text,
   },
   totalByFloorDetails: {
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    gap: spacing[8],
+  },
+  totalByFloorTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
   },
   totalByFloorDetail: {
-    fontSize: 11,
-    color: '#666',
+    ...typography.caption,
+    color: colors.textSecondary,
   },
   totalByFloorTotal: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-    width: 90,
+    ...typography.currencySmall,
+    color: colors.success,
+    minWidth: 80,
     textAlign: 'right',
   },
   grandTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing[12],
+    paddingTop: spacing[12],
     borderTopWidth: 2,
-    borderTopColor: '#4CAF50',
+    borderTopColor: colors.primary.main,
   },
   grandTotalLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
+    ...typography.label,
+    color: colors.text,
   },
   grandTotalValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4CAF50',
+    ...typography.currency,
+    fontSize: 18,
+    color: colors.primary.main,
+    flexShrink: 1,
   },
   calculateButton: {
-    marginHorizontal: 16,
-    borderRadius: 12,
+    marginHorizontal: spacing[16],
+    borderRadius: borderRadius.md,
     overflow: 'hidden',
-    elevation: 3,
+    ...shadows.primary,
   },
   calculateButtonGradient: {
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[16],
+    gap: spacing[8],
   },
   calculateButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...typography.button,
+    color: colors.textInverse,
   },
   exportButton: {
-    margin: 16,
-    marginTop: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 14,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[8],
+    margin: spacing[16],
+    marginTop: spacing[8],
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: borderRadius.sm,
+    padding: spacing[14],
   },
   exportButtonText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '600',
-  },
-  bottomSpacer: {
-    height: 200,
+    ...typography.buttonSmall,
+    color: colors.textSecondary,
   },
   saveButton: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    marginHorizontal: 16,
-    borderRadius: 16,
+    left: spacing[16],
+    right: spacing[16],
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    elevation: 4,
+    ...shadows.lg,
   },
   saveButtonDisabled: {
     opacity: 0.7,
   },
   saveButtonGradient: {
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  receiptButton: {
-    backgroundColor: '#2196F3',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 4,
-  },
-  receiptButtonDisabled: {
-    backgroundColor: '#90CAF9',
-  },
-  receiptButtonIcon: {
-    fontSize: 14,
-  },
-  receiptButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  receiptPreview: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    alignItems: 'center',
-  },
-  receiptImage: {
-    width: '100%',
-    height: 150,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
-  },
-  pdfPreview: {
-    width: '100%',
-    height: 80,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    paddingVertical: spacing[18],
+    gap: spacing[8],
   },
-  pdfIcon: {
-    fontSize: 32,
-  },
-  pdfName: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-    flex: 1,
-  },
-  receiptHint: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 8,
+  saveButtonText: {
+    ...typography.button,
+    color: colors.textInverse,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1613,19 +1785,14 @@ const styles = StyleSheet.create({
   },
   modalCloseButton: {
     position: 'absolute',
-    top: -20,
-    right: -10,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    top: -spacing[20],
+    right: -spacing[10],
+    backgroundColor: colors.overlay,
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  modalCloseText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
   },
 });
 
