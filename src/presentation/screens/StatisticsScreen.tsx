@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExpensePeriod } from '../../domain/entities/Expense';
 import { FinancePeriod, FinanceDebt } from '../../domain/entities/Finance';
-import { getDatabase } from '../../data/Database';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
+import { getExpenseRepo, getFinanceRepo } from '../../data/repos';
 import { getSavedGroupCode, getPeriodsFromCloud } from '../../services/SyncService';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
 import { TrendUp, TrendDown, Wallet, Warning, Lightning, Drop, House, CaretRight, Check } from 'phosphor-react-native';
@@ -87,15 +85,15 @@ const SimpleBarChart: React.FC<{
       <View style={customChartStyles.barSummary}>
         <View style={customChartStyles.barSummaryItem}>
           <Text style={[customChartStyles.barSummaryLabel, { color: '#2196F3' }]}>Total Ingresos</Text>
-          <Text style={[customChartStyles.barSummaryValue, { color: '#2196F3' }]}>{formatCurrency(totalIncome)}</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: '#2196F3' }]} numberOfLines={1}>{formatCurrency(totalIncome)}</Text>
         </View>
         <View style={customChartStyles.barSummaryItem}>
           <Text style={[customChartStyles.barSummaryLabel, { color: '#E53935' }]}>Total Gastos</Text>
-          <Text style={[customChartStyles.barSummaryValue, { color: '#E53935' }]}>{formatCurrency(totalExpense)}</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: '#E53935' }]} numberOfLines={1}>{formatCurrency(totalExpense)}</Text>
         </View>
         <View style={customChartStyles.barSummaryItem}>
           <Text style={[customChartStyles.barSummaryLabel, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>Balance</Text>
-          <Text style={[customChartStyles.barSummaryValue, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]}>{formatCurrency(netBalance)}</Text>
+          <Text style={[customChartStyles.barSummaryValue, { color: netBalance >= 0 ? '#43A047' : '#FF9800' }]} numberOfLines={1}>{formatCurrency(netBalance)}</Text>
         </View>
       </View>
       {totalPages > 1 && (
@@ -154,8 +152,8 @@ const SimplePieChart: React.FC<{
       {data.map((item, index) => (
         <View key={item.name} style={customChartStyles.pieRow}>
           <View style={[customChartStyles.pieDot, { backgroundColor: item.color }]} />
-          <Text style={customChartStyles.pieLabel}>{item.name}</Text>
-          <Text style={customChartStyles.pieValue}>{formatCurrency(item.amount)}</Text>
+          <Text style={customChartStyles.pieLabel} numberOfLines={1}>{item.name}</Text>
+          <Text style={customChartStyles.pieValue} numberOfLines={1}>{formatCurrency(item.amount)}</Text>
           <Text style={customChartStyles.piePercent}>{Math.round((item.amount / total) * 100)}%</Text>
         </View>
       ))}
@@ -340,19 +338,8 @@ const StatisticsScreen: React.FC = () => {
   useEffect(() => {
     setCurrentChartIndex(0);
     if (chartViewMode === 'all') {
-      console.log('===== MODO TODOS LOS PERIODOS (chartViewMode) =====');
-      console.log('monthlyLabels:', JSON.stringify(chartData.monthlyLabels));
-      console.log('years:', JSON.stringify(chartData.years));
-      console.log('incomeData:', JSON.stringify(chartData.incomeData));
-      console.log('expenseData:', JSON.stringify(chartData.expenseData));
-      console.log('trendData:', JSON.stringify(chartData.trendData));
-      console.log('categoryData:', JSON.stringify(chartData.categoryData));
       const totalIncome = chartData.incomeData.reduce((a, b) => a + b, 0);
       const totalExpenses = chartData.expenseData.reduce((a, b) => a + b, 0);
-      console.log('Total income (sum):', totalIncome);
-      console.log('Total expenses (sum):', totalExpenses);
-      console.log('Net balance:', totalIncome - totalExpenses);
-      console.log('===== FIN MODO TODOS LOS PERIODOS =====');
     }
   }, [chartViewMode]);
   
@@ -373,16 +360,14 @@ const StatisticsScreen: React.FC = () => {
   );
 
   const loadAllData = async () => {
-    console.log('loadAllData called, timeRange:', timeRange, 'selectedMonth:', selectedMonth, 'selectedYear:', selectedYear);
     setCurrentChartIndex(0);
     await Promise.all([
       loadSummaryData(),
       loadExpenseData(),
     ]);
     
-    const repo = new SQLiteFinanceRepository(getDatabase());
+    const repo = getFinanceRepo();
     const allPeriods = await repo.getAllPeriods();
-    console.log('All periods count:', allPeriods.length);
     
     if (timeRange === 'month') {
       const sortedPeriods = [...allPeriods].sort((a, b) => {
@@ -391,14 +376,11 @@ const StatisticsScreen: React.FC = () => {
         return monthB - monthA;
       });
       const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
-      console.log('Looking for month:', monthStr);
       const index = sortedPeriods.findIndex(p => p.year === selectedYear && parseInt(p.month.split('-')[1]) === selectedMonth + 1);
-      console.log('Found index:', index);
       if (index >= 0) setCurrentChartIndex(index);
     } else {
       if (allPeriods.length > 0) {
         const newIndex = allPeriods.length - 1;
-        console.log('Setting chart index to:', newIndex);
         setCurrentChartIndex(newIndex);
       }
     }
@@ -406,7 +388,7 @@ const StatisticsScreen: React.FC = () => {
 
   const loadSummaryData = async () => {
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const allPeriods = await repo.getAllPeriods();
       
       const sortedPeriods = [...allPeriods].sort((a, b) => {
@@ -433,20 +415,14 @@ const StatisticsScreen: React.FC = () => {
         filteredPeriods = sortedPeriods;
         monthLabel = 'Todos los períodos';
         
-        console.log('======= TODOS LOS PERIODOS (timeRange=all) =======');
-        console.log('Total periods from DB:', allPeriods.length);
         allPeriods.forEach((p, idx) => {
           const totalIncome = p.income.reduce((sum, i) => sum + i.amount, 0);
           const totalExpenses = p.expenses.reduce((sum, e) => sum + e.amount, 0);
-          console.log(`Period[${idx}]: ${p.month} (${p.monthName}) - Income: ${totalIncome}, Expenses: ${totalExpenses}`);
           if (p.income.length > 0) {
-            console.log('  Income items:', JSON.stringify(p.income.map(i => ({ source: i.source, amount: i.amount }))));
           }
           if (p.expenses.length > 0) {
-            console.log('  Expense items:', JSON.stringify(p.expenses.map(e => ({ category: e.category, amount: e.amount }))));
           }
         });
-        console.log('======= FIN TODOS LOS PERIODOS =======');
       }
       
       setFinancePeriods(filteredPeriods);
@@ -500,7 +476,6 @@ const StatisticsScreen: React.FC = () => {
       let expensesChange = 0;
       
       if (timeRange === 'all') {
-        console.log('======= CALCULO DE DEUDAS EN MODO ALL =======');
         
         // Usar Map para evitar duplicación de deudas - usar el período más reciente
         const uniqueDebts = new Map<string, { monthlyPayment: number, remainingAmount: number, isPaid: boolean, periodIndex: number }>();
@@ -510,7 +485,6 @@ const StatisticsScreen: React.FC = () => {
           totalExpenses += p.expenses.reduce((sum, e) => sum + e.amount, 0);
           totalSavings += p.savings || 0;
           
-          console.log(`Period ${p.month} ${p.year}: debts count = ${p.debts.length}`);
           p.debts.forEach(d => {
             const key = `${d.name}_${d.totalAmount}`;
             const existing = uniqueDebts.get(key);
@@ -527,10 +501,8 @@ const StatisticsScreen: React.FC = () => {
           });
         });
         
-        console.log('Unique debts:', JSON.stringify(Array.from(uniqueDebts.entries()).map(([k, v]) => ({ key: k, remainingAmount: v.remainingAmount, isPaid: v.isPaid, periodIndex: v.periodIndex }))));
         
         uniqueDebts.forEach((d, key) => {
-          console.log(`Debt ${key}: monthlyPayment=${d.monthlyPayment}, remainingAmount=${d.remainingAmount}, isPaid=${d.isPaid}, periodIndex=${d.periodIndex}`);
           if (!d.isPaid && d.remainingAmount > 0) {
             totalDebts += d.monthlyPayment;
           }
@@ -539,8 +511,6 @@ const StatisticsScreen: React.FC = () => {
           }
         });
         
-        console.log('totalDebts calculated:', totalDebts, 'paidDebts calculated:', paidDebts);
-        console.log('======= FIN CALCULO DE DEUDAS =======');
       } else if (filteredPeriods.length > 0) {
         const current = filteredPeriods[0];
         const previous = filteredPeriods.length > 1 ? filteredPeriods[1] : null;
@@ -599,9 +569,17 @@ const StatisticsScreen: React.FC = () => {
       let allPeriods: ExpensePeriod[] = [];
       
       if (code) {
-        allPeriods = await getPeriodsFromCloud(code);
+        try {
+          allPeriods = await getPeriodsFromCloud(code);
+        } catch (error) {
+          console.error('Error leyendo gastos de la nube, usando local:', error);
+        }
+        if (allPeriods.length === 0) {
+          const repo = getExpenseRepo();
+          allPeriods = await repo.getAllPeriods();
+        }
       } else {
-        const repo = new SQLiteExpenseRepository(getDatabase());
+        const repo = getExpenseRepo();
         allPeriods = await repo.getAllPeriods();
       }
 
@@ -869,7 +847,7 @@ const StatisticsScreen: React.FC = () => {
           {chartData.trendData.length > 1 && (
             <View style={styles.chartCard}>
               <View style={styles.chartHeaderRow}>
-                <Text style={styles.chartTitle}>Tendencia de Balance</Text>
+                <Text style={[styles.chartTitle, styles.chartNavTitle]} numberOfLines={1}>Tendencia de Balance</Text>
                 {chartViewMode === 'single' && chartData.monthlyLabels.length > 1 && (
                   <View style={styles.chartNav}>
                     <TouchableOpacity 
@@ -879,7 +857,7 @@ const StatisticsScreen: React.FC = () => {
                     >
                       <Text style={styles.chartNavText}>‹</Text>
                     </TouchableOpacity>
-                    <Text style={styles.chartNavMonth}>
+                    <Text style={styles.chartNavMonth} numberOfLines={1}>
                       {chartData.monthlyLabels.length > 0 ? chartData.monthlyLabels[Math.min(currentChartIndex, chartData.monthlyLabels.length - 1)] : ''} {chartData.years.length > 0 ? chartData.years[Math.min(currentChartIndex, chartData.years.length - 1)] : ''}
                     </Text>
                     <TouchableOpacity 
@@ -988,7 +966,6 @@ const StatisticsScreen: React.FC = () => {
     let activeDebts: FinanceDebt[] = [];
     
     if (isAllRange) {
-      console.log('======= ESTADO DE DEUDAS (isAllRange) =======');
       const debtMap = new Map<string, { debt: FinanceDebt; remaining: number; periodIndex: number }>();
       financePeriods.forEach((p, periodIndex) => {
         totalIncome += p.income.reduce((sum, i) => sum + i.amount, 0);
@@ -1005,7 +982,6 @@ const StatisticsScreen: React.FC = () => {
         });
       });
       
-      console.log('Debt map entries:', JSON.stringify(Array.from(debtMap.entries()).map(([k, v]) => ({ key: k, remaining: v.remaining, isPaid: v.debt.isPaid, periodIndex: v.periodIndex }))));
       
       // Calcular totalDebtRemaining y totalDebtOriginal solo con debts únicas del período más reciente
       let uniqueDebts: { debt: FinanceDebt; remaining: number }[] = [];
@@ -1020,8 +996,6 @@ const StatisticsScreen: React.FC = () => {
         }
       });
       
-      console.log('totalDebtRemaining:', totalDebtRemaining, 'totalDebtOriginal:', totalDebtOriginal);
-      console.log('======= FIN ESTADO DE DEUDAS =======');
       
       activeDebts = uniqueDebts
         .sort((a, b) => a.remaining - b.remaining)
@@ -1042,7 +1016,7 @@ const StatisticsScreen: React.FC = () => {
     return (
       <View style={styles.financeContainer}>
         <View style={styles.financeHeader}>
-          <Text style={styles.financeTitle}>{periodLabel}</Text>
+          <Text style={styles.financeTitle} numberOfLines={1}>{periodLabel}</Text>
         </View>
 
         <View style={styles.financeGrid}>
@@ -1078,19 +1052,19 @@ const StatisticsScreen: React.FC = () => {
             <View style={styles.debtSummaryGrid}>
               <View style={styles.debtSummaryItem}>
                 <Text style={styles.debtSummaryLabel}>Total Deuda</Text>
-                <Text style={styles.debtSummaryValue}>{formatCurrency(totalDebtOriginal)}</Text>
+                <Text style={styles.debtSummaryValue} numberOfLines={1}>{formatCurrency(totalDebtOriginal)}</Text>
               </View>
               <View style={styles.debtSummaryItem}>
                 <Text style={styles.debtSummaryLabel}>Ya Pagado</Text>
-                <Text style={[styles.debtSummaryValue, { color: '#43A047' }]}>{formatCurrency(totalPaid)}</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#43A047' }]} numberOfLines={1}>{formatCurrency(totalPaid)}</Text>
               </View>
               <View style={styles.debtSummaryItem}>
                 <Text style={styles.debtSummaryLabel}>Restante</Text>
-                <Text style={[styles.debtSummaryValue, { color: '#FF9800' }]}>{formatCurrency(totalDebtRemaining)}</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#FF9800' }]} numberOfLines={1}>{formatCurrency(totalDebtRemaining)}</Text>
               </View>
               <View style={styles.debtSummaryItem}>
                 <Text style={styles.debtSummaryLabel}>Cuota Mensual</Text>
-                <Text style={[styles.debtSummaryValue, { color: '#1565C0' }]}>{formatCurrency(totalDebts)}</Text>
+                <Text style={[styles.debtSummaryValue, { color: '#1565C0' }]} numberOfLines={1}>{formatCurrency(totalDebts)}</Text>
               </View>
             </View>
             <View style={styles.debtProgressContainer}>
@@ -1110,7 +1084,7 @@ const StatisticsScreen: React.FC = () => {
             {activeDebts.map((debt, index) => (
               <View key={debt.id || index} style={styles.debtRow}>
                 <View style={styles.debtInfo}>
-                  <Text style={styles.debtName}>{debt.name}</Text>
+                  <Text style={styles.debtName} numberOfLines={1}>{debt.name}</Text>
                   {debt.isPaid ? (
                     <Text style={[styles.debtRemaining, { color: '#43A047' }]}>
                       Total: {formatCurrency(debt.totalAmount)} • Pagado ✓
@@ -1258,6 +1232,7 @@ const customChartStyles = StyleSheet.create({
   barSummary: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    gap: 8,
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
@@ -1265,15 +1240,19 @@ const customChartStyles = StyleSheet.create({
   },
   barSummaryItem: {
     alignItems: 'center',
+    flex: 1,
   },
   barSummaryLabel: {
     fontSize: 11,
     color: '#666',
     marginBottom: 4,
+    flexShrink: 1,
   },
   barSummaryValue: {
     fontSize: 14,
     fontWeight: '600',
+    flexShrink: 1,
+    textAlign: 'center',
   },
   barGroup: {
     alignItems: 'center',
@@ -1299,6 +1278,7 @@ const customChartStyles = StyleSheet.create({
   barValue: {
     fontSize: 8,
     color: '#666',
+    flexShrink: 1,
   },
   barsContainer: {
     flexDirection: 'row',
@@ -1377,12 +1357,15 @@ const customChartStyles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#333',
+    flexShrink: 1,
   },
   pieValue: {
     fontSize: 13,
     fontWeight: '600',
     color: '#333',
     marginRight: 8,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   piePercent: {
     fontSize: 12,
@@ -1428,6 +1411,7 @@ const customChartStyles = StyleSheet.create({
   lineValue: {
     fontSize: 10,
     fontWeight: '500',
+    flexShrink: 1,
   },
   lineLabels: {
     flexDirection: 'row',
@@ -1828,6 +1812,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
+    flexShrink: 1,
   },
   debtProgressContainer: {
     marginTop: 8,
@@ -1970,6 +1955,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
+  },
+  chartNavTitle: {
+    flexShrink: 1,
   },
   chartNav: {
     flexDirection: 'row',
@@ -1997,7 +1986,9 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginHorizontal: 8,
     minWidth: 60,
+    maxWidth: 120,
     textAlign: 'center',
+    flexShrink: 1,
   },
   chartViewToggle: {
     flexDirection: 'row',

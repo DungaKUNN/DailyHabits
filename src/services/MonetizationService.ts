@@ -5,7 +5,6 @@ const PREMIUM_KEY = '@premium_status';
 const EXPIRY_DATE_KEY = '@premium_expiry_date';
 
 export const getPremiumStatus = async (): Promise<boolean> => {
-  console.log(`${LOG_PREFIX} getPremiumStatus - ini`);
   try {
     const premium = await AsyncStorage.getItem(PREMIUM_KEY);
     if (premium !== 'true') {
@@ -29,7 +28,6 @@ export const getPremiumStatus = async (): Promise<boolean> => {
 };
 
 const setPremiumStatus = async (isPremium: boolean, expiryDate?: Date): Promise<void> => {
-  console.log(`${LOG_PREFIX} setPremiumStatus - ini - isPremium: ${isPremium}`);
   try {
     await AsyncStorage.setItem(PREMIUM_KEY, isPremium ? 'true' : 'false');
     if (expiryDate) {
@@ -43,7 +41,6 @@ const setPremiumStatus = async (isPremium: boolean, expiryDate?: Date): Promise<
 };
 
 export const purchasePremium = async (): Promise<boolean> => {
-  console.log(`${LOG_PREFIX} purchasePremium - ini`);
   try {
     const expiryDate = new Date();
     expiryDate.setMonth(expiryDate.getMonth() + 1);

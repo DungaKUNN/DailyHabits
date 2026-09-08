@@ -7,15 +7,14 @@ const LOG_PREFIX = '[SQLiteExpenseRepo]';
 
 export class SQLiteExpenseRepository implements IExpenseRepository {
   private db: SQLite.SQLiteDatabase;
+  private ready: Promise<void>;
 
   constructor(db: SQLite.SQLiteDatabase) {
-    console.log(`${LOG_PREFIX} constructor`);
     this.db = db;
-    this.init();
+    this.ready = this.init();
   }
 
   private async init() {
-    console.log(`${LOG_PREFIX} init - creating tables`);
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS expense_periods (
         id TEXT PRIMARY KEY,
@@ -33,6 +32,9 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
         floorsWater TEXT,
         otherExpenses TEXT,
         income TEXT,
+        electricityReceiptPhoto TEXT,
+        waterReceiptPhoto TEXT,
+        savedSettings TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
       );
@@ -49,31 +51,46 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
         incomeSources TEXT
       );
     `);
+
+    // Migración para BDs creadas antes de estas columnas (ignorar si ya existen)
+    for (const ddl of [
+      'ALTER TABLE expense_periods ADD COLUMN electricityReceiptPhoto TEXT',
+      'ALTER TABLE expense_periods ADD COLUMN waterReceiptPhoto TEXT',
+      'ALTER TABLE expense_periods ADD COLUMN savedSettings TEXT',
+    ]) {
+      try {
+        await this.db.execAsync(ddl);
+      } catch {
+        // la columna ya existe
+      }
+    }
+
+    await this.db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_expense_periods_year_month ON expense_periods (year DESC, month DESC);
+    `);
   }
 
   async getAllPeriods(): Promise<ExpensePeriod[]> {
-    console.log(`${LOG_PREFIX} getAllPeriods - ini`);
+    await this.ready;
     const rows = await this.db.getAllAsync<any>('SELECT * FROM expense_periods ORDER BY year DESC, month DESC');
-    console.log(`${LOG_PREFIX} getAllPeriods - rows: ${rows.length}`);
     return rows.map(row => this.mapRowToPeriod(row));
   }
 
   async getPeriodById(id: string): Promise<ExpensePeriod | null> {
-    console.log(`${LOG_PREFIX} getPeriodById - id: ${id}`);
+    await this.ready;
     const row = await this.db.getFirstAsync<any>('SELECT * FROM expense_periods WHERE id = ?', id);
     return row ? this.mapRowToPeriod(row) : null;
   }
 
   async getPeriodByMonth(month: string): Promise<ExpensePeriod | null> {
-    console.log(`${LOG_PREFIX} getPeriodByMonth - month: ${month}`);
+    await this.ready;
     const row = await this.db.getFirstAsync<any>('SELECT * FROM expense_periods WHERE month = ?', month);
     return row ? this.mapRowToPeriod(row) : null;
   }
 
   async getLatestPeriod(): Promise<ExpensePeriod | null> {
-    console.log(`${LOG_PREFIX} getLatestPeriod - ini`);
+    await this.ready;
     const row = await this.db.getFirstAsync<any>('SELECT * FROM expense_periods ORDER BY year DESC, month DESC LIMIT 1');
-    console.log(`${LOG_PREFIX} getLatestPeriod - found: ${!!row}`);
     return row ? this.mapRowToPeriod(row) : null;
   }
 
@@ -85,9 +102,11 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
     return readings;
   }
 
-  async createPeriod(period: Omit<ExpensePeriod, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpensePeriod> {
-    console.log(`${LOG_PREFIX} createPeriod - ini - month: ${period.month}, year: ${period.year}`);
-    const id = generateId();
+  async createPeriod(period: Omit<ExpensePeriod, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<ExpensePeriod> {
+    await this.ready;
+    // Respetar el id que trae el caller (la pantalla lo usa para navegar);
+    // antes se generaba otro distinto y el estado quedaba con un id fantasma.
+    const id = (period as { id?: string }).id || generateId();
     const now = new Date().toISOString();
 
     await this.db.runAsync(
@@ -95,8 +114,9 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
         id, month, year, monthName,
         electricityTariffPerKwh, electricityIgvPercentage, electricityTotalReceipt,
         electricityTotalFromMeters, electricitySurplus, electricitySurplusToDistribute,
-        waterTotalReceipt, floorsElectricity, floorsWater, otherExpenses, income, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        waterTotalReceipt, floorsElectricity, floorsWater, otherExpenses, income,
+        electricityReceiptPhoto, waterReceiptPhoto, savedSettings, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       period.month,
       period.year,
@@ -112,6 +132,9 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
       JSON.stringify(period.floorsWater),
       JSON.stringify(period.otherExpenses || []),
       JSON.stringify(period.income || []),
+      JSON.stringify(period.electricity.receiptPhoto || null),
+      JSON.stringify(period.water.receiptPhoto || null),
+      JSON.stringify((period as Partial<ExpensePeriod>).savedSettings || null),
       now,
       now
     );
@@ -127,7 +150,7 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
   }
 
   async updatePeriod(id: string, period: Partial<ExpensePeriod>): Promise<ExpensePeriod> {
-    console.log(`${LOG_PREFIX} updatePeriod - ini - id: ${id}`);
+    await this.ready;
     const existing = await this.getPeriodById(id);
     if (!existing) throw new Error('Period not found');
 
@@ -147,11 +170,19 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
       values.push(period.electricity.surplus);
       updates.push('electricitySurplusToDistribute = ?');
       values.push(period.electricity.surplusToDistribute);
+      if (period.electricity.receiptPhoto !== undefined) {
+        updates.push('electricityReceiptPhoto = ?');
+        values.push(JSON.stringify(period.electricity.receiptPhoto || null));
+      }
     }
 
     if (period.water) {
       updates.push('waterTotalReceipt = ?');
       values.push(period.water.totalReceipt);
+      if (period.water.receiptPhoto !== undefined) {
+        updates.push('waterReceiptPhoto = ?');
+        values.push(JSON.stringify(period.water.receiptPhoto || null));
+      }
     }
 
     if (period.floorsElectricity) {
@@ -174,6 +205,11 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
       values.push(JSON.stringify(period.income));
     }
 
+    if (period.savedSettings !== undefined) {
+      updates.push('savedSettings = ?');
+      values.push(JSON.stringify(period.savedSettings || null));
+    }
+
     updates.push('updatedAt = ?');
     values.push(new Date().toISOString());
     values.push(id);
@@ -187,13 +223,71 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
   }
 
   async deletePeriod(id: string): Promise<void> {
-    console.log(`${LOG_PREFIX} deletePeriod - ini - id: ${id}`);
+    await this.ready;
     await this.db.runAsync('DELETE FROM expense_periods WHERE id = ?', id);
-    console.log(`${LOG_PREFIX} deletePeriod - ok`);
+  }
+
+  private buildCacheRow(period: ExpensePeriod): any[] {
+    return [
+      period.id,
+      period.month,
+      period.year,
+      period.monthName,
+      period.electricity?.tariffPerKwh ?? 0,
+      period.electricity?.igvPercentage ?? 18,
+      period.electricity?.totalReceipt ?? 0,
+      period.electricity?.totalFromMeters ?? 0,
+      period.electricity?.surplus ?? 0,
+      period.electricity?.surplusToDistribute ?? 0,
+      period.water?.totalReceipt ?? 0,
+      JSON.stringify(period.floorsElectricity || []),
+      JSON.stringify(period.floorsWater || []),
+      JSON.stringify(period.otherExpenses || []),
+      JSON.stringify(period.income || []),
+      JSON.stringify(period.electricity?.receiptPhoto || null),
+      JSON.stringify(period.water?.receiptPhoto || null),
+      JSON.stringify((period as Partial<ExpensePeriod>).savedSettings || null),
+      (period.createdAt || new Date()).toISOString(),
+      (period.updatedAt || new Date()).toISOString(),
+    ];
+  }
+
+  async cachePeriod(period: ExpensePeriod): Promise<void> {
+    await this.ready;
+    await this.db.runAsync(
+      `INSERT OR REPLACE INTO expense_periods (
+        id, month, year, monthName,
+        electricityTariffPerKwh, electricityIgvPercentage, electricityTotalReceipt,
+        electricityTotalFromMeters, electricitySurplus, electricitySurplusToDistribute,
+        waterTotalReceipt, floorsElectricity, floorsWater, otherExpenses, income,
+        electricityReceiptPhoto, waterReceiptPhoto, savedSettings, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ...this.buildCacheRow(period),
+    );
+  }
+
+  async cachePeriods(periods: ExpensePeriod[]): Promise<void> {
+    await this.ready;
+    // Un solo statement preparado en vez de N round-trips (antes 1 INSERT por período).
+    const sql = `INSERT OR REPLACE INTO expense_periods (
+        id, month, year, monthName,
+        electricityTariffPerKwh, electricityIgvPercentage, electricityTotalReceipt,
+        electricityTotalFromMeters, electricitySurplus, electricitySurplusToDistribute,
+        waterTotalReceipt, floorsElectricity, floorsWater, otherExpenses, income,
+        electricityReceiptPhoto, waterReceiptPhoto, savedSettings, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const statement = await this.db.prepareAsync(sql);
+    try {
+      for (const period of periods) {
+        await statement.executeAsync(...this.buildCacheRow(period));
+      }
+    } finally {
+      await statement.finalizeAsync();
+    }
   }
 
   async getSettings(): Promise<ExpenseSettings> {
-    console.log(`${LOG_PREFIX} getSettings - ini`);
+    await this.ready;
     const row = await this.db.getFirstAsync<any>('SELECT * FROM expense_settings WHERE id = "settings"');
     if (!row) {
       return {
@@ -219,6 +313,7 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
         hasElectricityMeter: f.hasElectricityMeter !== false,
         waterPercentage: f.waterPercentage ?? 0,
         waterFixedAmount: f.waterFixedAmount ?? 0,
+        igvPercentage: f.igvPercentage ?? undefined,
         fixedCharge: f.fixedCharge ?? 0,
       })),
       electricityTariffPerKwh: row.electricityTariffPerKwh || 0.66,
@@ -234,6 +329,7 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
   }
 
   async updateSettings(settings: ExpenseSettings): Promise<void> {
+    await this.ready;
     await this.db.runAsync(
       `INSERT OR REPLACE INTO expense_settings (id, floors, electricityTariffPerKwh, igvPercentage, waterTotalPercentage, expenseCategories, incomeSources)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -256,9 +352,9 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
     lines.push(['Período:', period.monthName, period.year].join(' '));
     lines.push('');
     lines.push(['ELECTRICIDAD'].join(','));
-    lines.push(['Tarifa por kWh:', `S/ ${period.electricity.tariffPerKwh}`].join(','));
+    lines.push(['Tarifa por kWh:', `S/${period.electricity.tariffPerKwh}`].join(','));
     lines.push(['IGV:', `${period.electricity.igvPercentage}%`].join(','));
-    lines.push(['Total Recibo:', `S/ ${period.electricity.totalReceipt.toFixed(2)}`].join(','));
+    lines.push(['Total Recibo:', `S/${period.electricity.totalReceipt.toFixed(2)}`].join(','));
     lines.push('');
     lines.push(['Piso', 'Lect. Anterior', 'Lect. Actual', 'Lect. Real', 'Consumo S/', 'IGV S/', 'Excedente S/', 'Total S/'].join(','));
     
@@ -277,7 +373,7 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
     
     lines.push('');
     lines.push(['AGUA'].join(','));
-    lines.push(['Total Recibo:', `S/ ${period.water.totalReceipt.toFixed(2)}`].join(','));
+    lines.push(['Total Recibo:', `S/${period.water.totalReceipt.toFixed(2)}`].join(','));
     lines.push('');
     lines.push(['Piso', 'Monto Fijo S/', 'Porcentaje %', 'Total S/'].join(','));
     
@@ -336,7 +432,20 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
     });
   }
 
+  private safeParse<T>(text: any, fallback: T): T {
+    try {
+      if (text == null || text === '') return fallback;
+      const v = JSON.parse(text);
+      return (v ?? fallback) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
   private mapRowToPeriod(row: any): ExpensePeriod {
+    const elecPhoto = this.safeParse<any>(row.electricityReceiptPhoto, null);
+    const waterPhoto = this.safeParse<any>(row.waterReceiptPhoto, null);
+    const saved = this.safeParse<any>(row.savedSettings, null);
     return {
       id: row.id,
       month: row.month,
@@ -349,15 +458,17 @@ export class SQLiteExpenseRepository implements IExpenseRepository {
         totalFromMeters: row.electricityTotalFromMeters || 0,
         surplus: row.electricitySurplus || 0,
         surplusToDistribute: row.electricitySurplusToDistribute || 0,
+        ...(elecPhoto ? { receiptPhoto: elecPhoto } : {}),
       },
       water: {
         totalReceipt: row.waterTotalReceipt || 0,
+        ...(waterPhoto ? { receiptPhoto: waterPhoto } : {}),
       },
-      floorsElectricity: JSON.parse(row.floorsElectricity || '[]'),
-      floorsWater: JSON.parse(row.floorsWater || '[]'),
-      otherExpenses: JSON.parse(row.otherExpenses || '[]'),
-      income: JSON.parse(row.income || '[]'),
-      savedSettings: {
+      floorsElectricity: this.safeParse(row.floorsElectricity, []),
+      floorsWater: this.safeParse(row.floorsWater, []),
+      otherExpenses: this.safeParse(row.otherExpenses, []),
+      income: this.safeParse(row.income, []),
+      savedSettings: saved && Array.isArray(saved.floors) ? saved : {
         floors: [],
         electricityTariffPerKwh: row.electricityTariffPerKwh || 0.66,
         igvPercentage: row.electricityIgvPercentage || 18,

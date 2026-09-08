@@ -51,11 +51,10 @@ import { MONETIZATION_CONFIG } from '../../services/MonetizationConfig';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { getDatabase } from '../../data/Database';
+import { getExpenseRepo, getFinanceRepo } from '../../data/repos';
 import { FinancePeriod } from '../../domain/entities/Finance';
-import { getSavedGroupCode, getSavedGroupName, clearGroupCode } from '../../services/SyncService';
+import { ExpensePeriod } from '../../domain/entities/Expense';
+import { getSavedGroupCode, getSavedGroupName, clearGroupCode, getPeriodsFromCloud } from '../../services/SyncService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type ProfileNavigationProp = StackNavigationProp<RootStackParamList>;
@@ -101,19 +100,14 @@ const ProfileScreen: React.FC = () => {
 
   useEffect(() => {
     if (showSimulatorModal) {
-      console.log('======= SIMULADOR - Abriendo modal, recargando datos =======');
       const reloadData = async () => {
         try {
-          const financeRepo = new SQLiteFinanceRepository(getDatabase());
-          const expenseRepo = new SQLiteExpenseRepository(getDatabase());
+          const financeRepo = getFinanceRepo();
           const financePeriods = await financeRepo.getAllPeriods();
-          const expensePeriods = await expenseRepo.getAllPeriods();
+          const expensePeriods = await getExpensePeriods();
           
-          console.log('SIMULADOR - Períodos obtenidos:', financePeriods.length);
           if (financePeriods.length > 0) {
             const lastPeriod = financePeriods[financePeriods.length - 1];
-            console.log('SIMULADOR - Período más reciente:', lastPeriod.monthName, lastPeriod.year);
-            console.log('SIMULADOR - Deudas en último período:', JSON.stringify(lastPeriod.debts));
           }
           
           let totalIncome = 0;
@@ -150,7 +144,6 @@ const ProfileScreen: React.FC = () => {
             }
           });
 
-          console.log('SIMULADOR - totalDebtOriginal:', totalDebtOriginal);
 
           let totalLuz = 0;
           let totalAgua = 0;
@@ -163,8 +156,6 @@ const ProfileScreen: React.FC = () => {
           const averageIncome = financePeriods.length > 0 ? totalIncome / financePeriods.length : 0;
           const averageExpenses = financePeriods.length > 0 ? totalExpenses / financePeriods.length : 0;
 
-          console.log('SIMULADOR - totalDebtRemaining:', totalDebtRemaining);
-          console.log('SIMULADOR - uniqueDebts:', Array.from(uniqueDebts.entries()).map(([k, v]) => `${k}: ${v.remainingAmount}`));
 
           setFinanceData({
             averageIncome,
@@ -210,7 +201,6 @@ const ProfileScreen: React.FC = () => {
               debtDetails
             });
           }
-          console.log('SIMULADOR - detailedData:', detailed);
           setDetailedData(detailed);
         } catch (error) {
           console.error('Error reloadData:', error);
@@ -221,39 +211,40 @@ const ProfileScreen: React.FC = () => {
   }, [showSimulatorModal]);
 
   const loadSettings = async () => {
-    console.log(`${LOG_PREFIX} loadSettings - ini`);
     const payment = await getPaymentReminderSettings();
-    console.log(`${LOG_PREFIX} loadSettings - payment loaded`);
     const premium = await getPremiumStatus();
-    console.log(`${LOG_PREFIX} loadSettings - premium: ${premium}`);
     const code = await getSavedGroupCode();
-    console.log(`${LOG_PREFIX} loadSettings - code: ${code}`);
     const name = await getSavedGroupName();
-    console.log(`${LOG_PREFIX} loadSettings - name: ${name}`);
     setPaymentSettings(payment);
     setIsPremium(premium);
     setGroupCode(code);
     setGroupName(name);
     await loadFinanceData();
-    console.log(`${LOG_PREFIX} loadSettings - fin`);
     setLoading(false);
+  };
+
+  const getExpensePeriods = async (): Promise<ExpensePeriod[]> => {
+    const code = await getSavedGroupCode();
+    if (code) {
+      try {
+        return await getPeriodsFromCloud(code);
+      } catch (error) {
+        console.error('Error leyendo gastos de la nube, usando local:', error);
+      }
+    }
+    const expenseRepo = getExpenseRepo();
+    return expenseRepo.getAllPeriods();
   };
 
   const loadFinanceData = async () => {
     try {
-      console.log(`${LOG_PREFIX} loadFinanceData - ini`);
-      const financeRepo = new SQLiteFinanceRepository(getDatabase());
-      const expenseRepo = new SQLiteExpenseRepository(getDatabase());
-      
+      const financeRepo = getFinanceRepo();
+
       const financePeriods = await financeRepo.getAllPeriods();
-      const expensePeriods = await expenseRepo.getAllPeriods();
+      const expensePeriods = await getExpensePeriods();
       
-      console.log('======= SIMULADOR DE DEUDAS - loadFinanceData =======');
-      console.log('Períodos de Finanzas:', financePeriods.length);
-      console.log('Períodos de Gastos (Luz/Agua):', expensePeriods.length);
       
       if (financePeriods.length === 0 && expensePeriods.length === 0) {
-        console.log('No hay períodos registrados');
         setFinanceData(null);
         return;
       }
@@ -284,9 +275,7 @@ const ProfileScreen: React.FC = () => {
         });
       });
 
-      console.log('Deudas únicas (período más reciente):');
       uniqueDebts.forEach((d, key) => {
-        console.log(`  ${key}: remainingAmount=${d.remainingAmount}, isPaid=${d.remainingAmount <= 0}`);
         totalDebtOriginal += d.totalAmount;
         if (d.remainingAmount > 0) {
           totalDebtRemaining += d.remainingAmount;
@@ -304,9 +293,6 @@ const ProfileScreen: React.FC = () => {
         totalAgua += p.water.totalReceipt || 0;
       });
 
-      console.log('Gastos de Luz y Agua:');
-      console.log('  Total Luz:', totalLuz);
-      console.log('  Total Agua:', totalAgua);
 
       const totalMonths = Math.max(financePeriods.length, expensePeriods.length, 1);
       const averageIncome = totalIncome / totalMonths;
@@ -317,15 +303,6 @@ const ProfileScreen: React.FC = () => {
       const totalExpenses = totalFinanceExpenses + totalLuz + totalAgua;
       const averageTotalExpenses = averageFinanceExpenses + averageLuz + averageAgua;
 
-      console.log('RESULTADOS PROMEDIO MENSUAL:');
-      console.log('  Ingresos promedio:', averageIncome);
-      console.log('  Gastos Finanzas promedio:', averageFinanceExpenses);
-      console.log('  Luz promedio:', averageLuz);
-      console.log('  Agua promedio:', averageAgua);
-      console.log('  Total gastos promedio:', averageTotalExpenses);
-      console.log('  Disponible (para pagar deudas):', averageIncome - averageTotalExpenses);
-      console.log('  Total deuda pendiente:', totalDebtRemaining);
-      console.log('======= FIN SIMULADOR =======');
 
       setFinanceData({
         averageIncome,
@@ -375,7 +352,6 @@ const ProfileScreen: React.FC = () => {
         });
       }
       
-      console.log('Datos detallados por mes:', detailedData);
       setDetailedData(detailedData);
     } catch (error) {
       console.error('Error loading finance data:', error);
@@ -384,7 +360,6 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleBuyPremium = () => {
-    console.log(`${LOG_PREFIX} handleBuyPremium - ini`);
     Alert.alert(
       'Únete a Premium!',
       `Versión premium por ${MONETIZATION_CONFIG.PRICES.MONTHLY}/mes\n\nSin publicidad\nGráficos avanzados\nExportar a Excel\nFunciones exclusivas\n\n*Esta es una versión de prueba`,
@@ -393,13 +368,10 @@ const ProfileScreen: React.FC = () => {
         {
           text: '¡Quiero Premium!',
           onPress: async () => {
-            console.log(`${LOG_PREFIX} handleBuyPremium - comprando`);
             const success = await purchasePremium();
-            console.log(`${LOG_PREFIX} handleBuyPremium - success: ${success}`);
             if (success) {
               setIsPremium(true);
               Alert.alert('¡Felicidades!', 'Ahora eres usuario Premium');
-              console.log(`${LOG_PREFIX} handleBuyPremium - premium activado`);
             } else {
               Alert.alert('Error', 'No se pudo completar la compra');
             }
@@ -410,7 +382,6 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleRestorePremium = () => {
-    console.log(`${LOG_PREFIX} handleRestorePremium - ini`);
     Alert.alert(
       'Restaurar compra',
       '¿Restaurar estado Premium de una compra anterior?',
@@ -419,9 +390,7 @@ const ProfileScreen: React.FC = () => {
         {
           text: 'Restaurar',
           onPress: async () => {
-            console.log(`${LOG_PREFIX} handleRestorePremium - restaurando`);
             const success = await restorePurchases();
-            console.log(`${LOG_PREFIX} handleRestorePremium - success: ${success}`);
             if (success) {
               setIsPremium(true);
               Alert.alert('¡Listo!', 'Compra restaurada exitosamente');
@@ -435,14 +404,11 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleLeaveGroup = () => {
-    console.log(`${LOG_PREFIX} handleLeaveGroup - ini - group: ${groupName || groupCode}`);
     setLeaveGroupDialogVisible(true);
   };
 
   const confirmLeaveGroup = async () => {
-    console.log(`${LOG_PREFIX} handleLeaveGroup - confirmando`);
     await clearGroupCode();
-    console.log(`${LOG_PREFIX} handleLeaveGroup - código limpiado`);
     setGroupCode(null);
     setGroupName(null);
     setLeaveGroupDialogVisible(false);
@@ -450,7 +416,6 @@ const ProfileScreen: React.FC = () => {
   };
 
   const togglePaymentReminders = async (enabled: boolean) => {
-    console.log(`${LOG_PREFIX} togglePaymentReminders - ini - enabled: ${enabled}`);
     if (enabled) {
       const granted = await requestNotificationPermissions();
       if (!granted) {
@@ -931,17 +896,12 @@ const ProfileScreen: React.FC = () => {
                     {detailedData.length > 0 && (
                       <>
                         {(() => {
-                          console.log('=== RENDER Deudas Pendientes ===');
-                          console.log('detailedData length:', detailedData.length);
                           detailedData.forEach((item, index) => {
-                            console.log(`Periodo ${index}: ${item.month} ${item.year}`);
-                            console.log('  debtDetails:', JSON.stringify(item.debtDetails));
                           });
                           return null;
                         })()}
                         {detailedData.map((item, index) => {
                           const debts = item?.debtDetails?.filter((d: any) => d.remaining > 0 && !d.paidThisMonth) || [];
-                          console.log(`Render ${item.month}: ${debts.length} debts pendientes (no pagadas)`);
                           if (debts.length === 0) return null;
                           const isCurrent = index === detailedData.length - 1;
                           return (
@@ -960,7 +920,7 @@ const ProfileScreen: React.FC = () => {
                                 <View key={i} style={styles.debtItemRow}>
                                   <View style={styles.debtItemDot} />
                                   <Text style={styles.debtItemName}>{d.name}</Text>
-                                  <Text style={styles.debtItemAmount}>S/ {d.remaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                                  <Text style={styles.debtItemAmount}>S/{d.remaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
                                 </View>
                               ))}
                             </View>
@@ -972,15 +932,15 @@ const ProfileScreen: React.FC = () => {
                     <View style={styles.modalSummaryDivider} />
                     <View style={styles.modalSummaryRow}>
                       <Text style={styles.modalSummaryLabel}>Deuda total (original)</Text>
-                      <Text style={[styles.modalSummaryValue, { color: colors.primary.main }]} numberOfLines={1}>S/ {(financeData.totalDebtOriginal || 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                      <Text style={[styles.modalSummaryValue, { color: colors.primary.main }]} numberOfLines={1}>S/{(financeData.totalDebtOriginal || 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
                     </View>
                     <View style={styles.modalSummaryRow}>
                       <Text style={styles.modalSummaryLabel}>Total pendiente</Text>
-                      <Text style={[styles.modalSummaryValue, { color: colors.warning, fontSize: 18 }]} numberOfLines={1}>S/ {financeData.totalDebtRemaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                      <Text style={[styles.modalSummaryValue, { color: colors.warning, fontSize: 18 }]} numberOfLines={1}>S/{financeData.totalDebtRemaining.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
                     </View>
                     <View style={styles.modalSummaryRow}>
                       <Text style={styles.modalSummaryLabel}>Pago mensual</Text>
-                      <Text style={styles.modalSummaryValue} numberOfLines={1}>S/ {financeData.monthlyPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
+                      <Text style={styles.modalSummaryValue} numberOfLines={1}>S/{financeData.monthlyPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}</Text>
                     </View>
                   </View>
                 )}
@@ -1044,7 +1004,7 @@ const ProfileScreen: React.FC = () => {
                           <View style={styles.modalAvailableCard}>
                             <Text style={styles.modalAvailableLabel}>Disponible (Ingresos - Gastos)</Text>
                             <Text style={[styles.modalAvailableValue, { color: colors.textMuted }]}>
-                              S/ 0.00
+                              S/0.00
                             </Text>
                             <Text style={styles.modalHintText}>Ingresa valores arriba para calcular</Text>
                           </View>
@@ -1059,7 +1019,7 @@ const ProfileScreen: React.FC = () => {
                         <View style={styles.modalAvailableCard}>
                           <Text style={styles.modalAvailableLabel}>Disponible (Ingresos - Gastos)</Text>
                           <Text style={[styles.modalAvailableValue, { color: available >= 0 ? colors.success : colors.error }]}>
-                            S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
+S/{available.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
                           </Text>
                           {available < 0 && (
                             <View style={styles.warningRow}>
@@ -1111,8 +1071,8 @@ const ProfileScreen: React.FC = () => {
                               <Text style={styles.modalResultValue}>Libre de deudas en {monthsRemaining} meses</Text>
                               <Text style={styles.modalResultDate}>Fecha estimada: {monthNames[futureDate.getMonth()]} {futureDate.getFullYear()}</Text>
                               <Text style={styles.modalResultSubtext} numberOfLines={3}>
-                                Pagando S/ {totalPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}/mes{'\n'}
-                                (S/ {available.toLocaleString('es-PE', { minimumFractionDigits: 2 })} disponible + S/ {additional.toLocaleString('es-PE', { minimumFractionDigits: 2 })} adicional)
+                                Pagando S/{totalPayment.toLocaleString('es-PE', { minimumFractionDigits: 2 })}/mes{'\n'}
+                                (S/{available.toLocaleString('es-PE', { minimumFractionDigits: 2 })} disponible + S/{additional.toLocaleString('es-PE', { minimumFractionDigits: 2 })} adicional)
                               </Text>
                             </>
                           ) : totalPayment <= 0 ? (
@@ -1688,14 +1648,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing[6],
+    gap: spacing[12],
   },
   modalSummaryLabel: {
     ...typography.bodySmall,
     color: colors.textMuted,
+    flexShrink: 1,
   },
   modalSummaryValue: {
     ...typography.bodyMedium,
     color: colors.text,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   modalSimulatorSection: {
     marginTop: spacing[20],
@@ -1853,6 +1817,7 @@ const styles = StyleSheet.create({
   debtItemTitle: {
     ...typography.label,
     color: colors.warning,
+    flexShrink: 1,
   },
   currentBadge: {
     backgroundColor: colors.warningLight,

@@ -4,6 +4,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
+  RefreshControl,
   TouchableOpacity,
   Animated,
   Alert,
@@ -28,8 +30,7 @@ import {
   Share as ShareIcon,
 } from 'phosphor-react-native';
 import { ExpensePeriod, ExpenseSettings } from '../../domain/entities/Expense';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { getDatabase } from '../../data/Database';
+import { getExpenseRepo } from '../../data/repos';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -40,12 +41,85 @@ import {
   getSavedGroupName,
   savePeriodToCloud,
   getPeriodsFromCloud,
+  getGroupSettings,
   deletePeriodFromCloud,
 } from '../../services/SyncService';
 
 type ExpensesScreenNavigationProp = StackNavigationProp<RootStackParamList, 'MainTabs'>;
 
-const LOG_PREFIX = '[ExpensesScreen]';
+const getTotalElectricity = (period: ExpensePeriod) => {
+  return (period.floorsElectricity || []).reduce((sum, f) => sum + (f.totalToPay || 0), 0);
+};
+
+const getTotalWater = (period: ExpensePeriod) => {
+  return (period.floorsWater || []).reduce((sum, f) => sum + (f.amount || 0), 0);
+};
+
+const sortPeriods = (list: ExpensePeriod[]): ExpensePeriod[] =>
+  [...list].sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return parseInt(String(b.month).split('-')[1], 10) - parseInt(String(a.month).split('-')[1], 10);
+  });
+
+interface PeriodCardProps {
+  period: ExpensePeriod;
+  totalElectricity: number;
+  totalWater: number;
+  onPress: () => void;
+  onLongPress: () => void;
+}
+
+// Fuera del componente: así React.memo sí funciona (antes se recreaba en
+// cada render y el memo no servía para nada).
+const PeriodCard = React.memo<PeriodCardProps>(({ period, totalElectricity, totalWater, onPress, onLongPress }) => (
+  <TouchableOpacity
+    style={styles.periodCard}
+    onPress={onPress}
+    onLongPress={onLongPress}
+    activeOpacity={0.7}
+  >
+    <View style={styles.periodCardContent}>
+      <View style={styles.periodHeader}>
+        <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName} {period.year}</Text>
+        <Text style={styles.periodTotal} numberOfLines={1}>
+          {formatCurrency(totalElectricity + totalWater)}
+        </Text>
+      </View>
+
+      <View style={styles.periodDetails}>
+        <View style={styles.periodDetail}>
+          <View style={[styles.periodDetailIconContainer, styles.electricityIconBg]}>
+            <Lightning size={16} color={colors.accent.orange} weight="fill" />
+          </View>
+          <View style={styles.periodDetailTextContainer}>
+            <Text style={styles.periodDetailLabel}>Electricidad</Text>
+            <Text style={styles.periodDetailValue} numberOfLines={1}>
+              {period.floorsElectricity.length} pisos • {formatCurrency(totalElectricity)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.periodDetail}>
+          <View style={[styles.periodDetailIconContainer, styles.waterIconBg]}>
+            <Drop size={16} color={colors.accent.blue} weight="fill" />
+          </View>
+          <View style={styles.periodDetailTextContainer}>
+            <Text style={styles.periodDetailLabel}>Agua</Text>
+            <Text style={styles.periodDetailValue} numberOfLines={1}>
+              {formatCurrency(totalWater)}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.periodFooter}>
+        <Text style={styles.tapHint}>Toca para editar</Text>
+        <View style={styles.tapHintDot} />
+        <Text style={styles.tapHint}>Mantén para eliminar</Text>
+      </View>
+    </View>
+  </TouchableOpacity>
+));
 
 const ExpensesScreen: React.FC = () => {
   const navigation = useNavigation<ExpensesScreenNavigationProp>();
@@ -57,6 +131,11 @@ const ExpensesScreen: React.FC = () => {
   const [groupCode, setGroupCode] = useState<string | null>(null);
   const [groupName, setGroupName] = useState<string>('Mi Grupo');
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const loadedRef = React.useRef(false);
+  const lastLoadRef = React.useRef(0);
+  const loadingRef = React.useRef(false);
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ExpensePeriod | null>(null);
   const [feedbackDialogVisible, setFeedbackDialogVisible] = useState(false);
@@ -81,49 +160,108 @@ const ExpensesScreen: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect [] - ini`);
     initScreen();
-    console.log(`${LOG_PREFIX} useEffect [] - fin`);
   }, []);
 
-  const initScreen = async () => {
-    console.log(`${LOG_PREFIX} initScreen - ini`);
-    setIsLoading(true);
+  // force=true solo desde init y pull-to-refresh. El foco de navegación
+  // reutiliza datos si se cargaron hace menos de 30s: antes cada regreso
+  // a esta pestaña descargaba toda la colección de Firestore.
+  const loadFromSource = async (force: boolean = false) => {
+    if (!force && Date.now() - lastLoadRef.current < 30000) return;
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
     const code = await getSavedGroupCode();
-    console.log(`${LOG_PREFIX} initScreen - code: ${code}`);
     const name = await getSavedGroupName();
-    console.log(`${LOG_PREFIX} initScreen - name: ${name}`);
+    setGroupCode(code);
+    if (name) {
+      setGroupName(name);
+    }
 
     if (code) {
-      console.log(`${LOG_PREFIX} initScreen - hay código, cargando desde cloud`);
-      setGroupCode(code);
-      setGroupName(name || 'Mi Grupo');
+      try {
+        const [cloudPeriods, cloudSettings] = await Promise.all([
+          getPeriodsFromCloud(code),
+          getGroupSettings(code),
+        ]);
+        const sorted = sortPeriods(cloudPeriods);
+        setPeriods(sorted);
+        if (cloudSettings) {
+          setSettings(cloudSettings);
+        }
+        setOffline(false);
 
-      const cloudPeriods = await getPeriodsFromCloud(code);
-      console.log(`${LOG_PREFIX} initScreen - cloudPeriods: ${cloudPeriods.length}`);
-      setPeriods(cloudPeriods);
-      setIsLoading(false);
+        try {
+          const repo = getExpenseRepo();
+          await repo.cachePeriods(sorted);
+          if (cloudSettings) {
+            await repo.updateSettings(cloudSettings);
+          }
+        } catch (cacheError) {
+          console.error('Error cacheando datos localmente:', cacheError);
+        }
+      } catch (error) {
+        console.error('Error cargando desde cloud, usando datos locales:', error);
+        setOffline(true);
+        const repo = getExpenseRepo();
+        const [periodsData, settingsData] = await Promise.all([
+          repo.getAllPeriods(),
+          repo.getSettings(),
+        ]);
+        setPeriods(sortPeriods(periodsData));
+        setSettings(settingsData);
+      }
     } else {
-      const repo = new SQLiteExpenseRepository(getDatabase());
+      setOffline(false);
+      const repo = getExpenseRepo();
       const [periodsData, settingsData] = await Promise.all([
         repo.getAllPeriods(),
         repo.getSettings(),
       ]);
-      setPeriods(periodsData);
+      setPeriods(sortPeriods(periodsData));
       setSettings(settingsData);
-      setIsLoading(false);
+    }
+    lastLoadRef.current = Date.now();
+    } finally {
+      loadingRef.current = false;
     }
   };
 
+  const initScreen = async () => {
+    setIsLoading(true);
+    await loadFromSource(true);
+    setIsLoading(false);
+    loadedRef.current = true;
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (loadedRef.current) {
+        loadFromSource();
+      }
+    }, [])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadFromSource(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const creatingRef = React.useRef(false);
+
   const createNewPeriod = async () => {
-    console.log(`${LOG_PREFIX} createNewPeriod - ini - month: ${selectedMonth + 1}, year: ${selectedYear}`);
+    // Evita doble tap: dos períodos del mismo mes si se pulsa Crear 2 veces.
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     try {
       const monthStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
-      console.log(`${LOG_PREFIX} createNewPeriod - monthStr: ${monthStr}`);
 
       const existing = periods.find(p => p.month === monthStr);
       if (existing) {
-        console.log(`${LOG_PREFIX} createNewPeriod - ya existe`);
         Alert.alert('Error', 'Ya existe un registro para este mes');
         return;
       }
@@ -142,7 +280,7 @@ const ExpensesScreen: React.FC = () => {
           });
         }
       } else {
-        const repo = new SQLiteExpenseRepository(getDatabase());
+        const repo = getExpenseRepo();
         const latestPeriod = await repo.getLatestPeriod();
         if (latestPeriod) {
           latestReadings = repo.getLatestReadingsFromPeriod(latestPeriod);
@@ -206,15 +344,12 @@ const ExpensesScreen: React.FC = () => {
         updatedAt: new Date(),
       };
 
-      if (groupCode) {
-        await savePeriodToCloud(groupCode, newPeriod);
-      } else {
-        const repo = new SQLiteExpenseRepository(getDatabase());
-        await repo.createPeriod(newPeriod);
-        setPeriods(prev => [...prev, newPeriod]);
-      }
-
+      // UI optimista: el mes aparece y el modal cierra AL INSTANTE, sin
+      // esperar la escritura en Firestore/SQLite (eso era la demora).
+      // La persistencia corre en segundo plano con rollback si falla.
+      const optimisticPeriod = newPeriod;
       setShowNewPeriodModal(false);
+      setPeriods(prev => sortPeriods([...prev, optimisticPeriod]));
 
       if (latestReadings.size > 0) {
         setFeedbackData({
@@ -224,10 +359,41 @@ const ExpensesScreen: React.FC = () => {
         });
         setFeedbackDialogVisible(true);
       }
+
+      try {
+        if (groupCode) {
+          // Local primero (rápido: el detalle abre al instante aunque la
+          // nube aún esté subiendo), nube después en segundo plano.
+          try {
+            await getExpenseRepo().cachePeriod(newPeriod);
+          } catch (cacheError) {
+            console.error('Error cacheando período localmente:', cacheError);
+          }
+          await savePeriodToCloud(groupCode, newPeriod);
+        } else {
+          // SQLite local es rápido, pero igual ya se mostró el mes arriba;
+          // se corrige el id por el real guardado por si difiere.
+          const saved = await getExpenseRepo().createPeriod(newPeriod);
+          setPeriods(prev => prev.map(p => (p.id === optimisticPeriod.id ? saved : p)));
+        }
+      } catch (persistError) {
+        // Rollback completo: quitar el mes optimista y su caché local.
+        setPeriods(prev => prev.filter(p => p.id !== optimisticPeriod.id));
+        try {
+          await getExpenseRepo().deletePeriod(optimisticPeriod.id);
+        } catch {
+          // ignorar: si no se cacheó, no hay nada que borrar
+        }
+        setShowNewPeriodModal(true);
+        setFeedbackData({ title: 'Error', message: 'No se pudo crear el período. Revisa tu conexión e inténtalo de nuevo.', variant: 'info' });
+        setFeedbackDialogVisible(true);
+      }
     } catch (error) {
       console.error('Error creating period:', error);
       setFeedbackData({ title: 'Error', message: 'No se pudo crear el período', variant: 'info' });
       setFeedbackDialogVisible(true);
+    } finally {
+      creatingRef.current = false;
     }
   };
 
@@ -243,8 +409,15 @@ const ExpensesScreen: React.FC = () => {
         await deletePeriodFromCloud(groupCode, deleteTarget.id);
       }
       setPeriods(prev => prev.filter(p => p.id !== deleteTarget.id));
+      try {
+        const repo = getExpenseRepo();
+        await repo.deletePeriod(deleteTarget.id);
+      } catch (cacheError) {
+        console.error('Error eliminando período localmente:', cacheError);
+      }
     } catch (error) {
       console.error('Error deleting period:', error);
+      Alert.alert('Error', 'No se pudo eliminar el período. Revisa tu conexión.');
     }
     setDeleteDialogVisible(false);
     setDeleteTarget(null);
@@ -264,62 +437,26 @@ const ExpensesScreen: React.FC = () => {
   };
 
   const getTotalElectricity = (period: ExpensePeriod) => {
-    return period.floorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);
+    return (period.floorsElectricity || []).reduce((sum, f) => sum + (f.totalToPay || 0), 0);
   };
 
   const getTotalWater = (period: ExpensePeriod) => {
-    return period.floorsWater.reduce((sum, f) => sum + f.amount, 0);
+    return (period.floorsWater || []).reduce((sum, f) => sum + (f.amount || 0), 0);
   };
 
-  const PeriodCard = React.memo<{ period: ExpensePeriod }>(({ period }) => (
-    <TouchableOpacity
-      style={styles.periodCard}
-      onPress={() => navigation.navigate('ExpenseDetail', { periodId: period.id })}
-      onLongPress={() => deletePeriod(period)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.periodCardContent}>
-        <View style={styles.periodHeader}>
-          <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName} {period.year}</Text>
-          <Text style={styles.periodTotal} numberOfLines={1}>
-            {formatCurrency(getTotalElectricity(period) + getTotalWater(period))}
-          </Text>
-        </View>
+  const renderPeriodItem = React.useCallback(({ item }: { item: ExpensePeriod }) => (
+    <View style={styles.periodItemWrapper}>
+      <PeriodCard
+        period={item}
+        totalElectricity={getTotalElectricity(item)}
+        totalWater={getTotalWater(item)}
+        onPress={() => navigation.navigate('ExpenseDetail', { periodId: item.id })}
+        onLongPress={() => deletePeriod(item)}
+      />
+    </View>
+  ), [navigation, periods]);
 
-        <View style={styles.periodDetails}>
-          <View style={styles.periodDetail}>
-            <View style={[styles.periodDetailIconContainer, styles.electricityIconBg]}>
-              <Lightning size={16} color={colors.accent.orange} weight="fill" />
-            </View>
-            <View style={styles.periodDetailTextContainer}>
-              <Text style={styles.periodDetailLabel}>Electricidad</Text>
-              <Text style={styles.periodDetailValue} numberOfLines={1}>
-                {period.floorsElectricity.length} pisos • {formatCurrency(getTotalElectricity(period))}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.periodDetail}>
-            <View style={[styles.periodDetailIconContainer, styles.waterIconBg]}>
-              <Drop size={16} color={colors.accent.blue} weight="fill" />
-            </View>
-            <View style={styles.periodDetailTextContainer}>
-              <Text style={styles.periodDetailLabel}>Agua</Text>
-              <Text style={styles.periodDetailValue} numberOfLines={1}>
-                {formatCurrency(getTotalWater(period))}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.periodFooter}>
-          <Text style={styles.tapHint}>Toca para editar</Text>
-          <View style={styles.tapHintDot} />
-          <Text style={styles.tapHint}>Mantén para eliminar</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  ));
+  const periodKeyExtractor = React.useCallback((item: ExpensePeriod) => item.id, []);
 
   return (
     <View style={styles.container}>
@@ -329,7 +466,7 @@ const ExpensesScreen: React.FC = () => {
           <View style={styles.headerTop}>
             <View style={styles.headerTitleRow}>
               <House size={22} color={colors.common.white} weight="fill" />
-              <View>
+              <View style={styles.headerTitleTextBlock}>
                 <Text style={styles.headerTitle} numberOfLines={1}>{groupName}</Text>
                 <Text style={styles.headerSubtitle}>Luz y Agua</Text>
               </View>
@@ -351,78 +488,88 @@ const ExpensesScreen: React.FC = () => {
         </SafeAreaView>
       </LinearGradient>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {settings && (
-          <Animated.View
-            style={[
-              styles.settingsCard,
-              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('FloorsConfig')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.settingsIconContainer}>
-                <GearSix size={20} color={colors.primary.main} weight="bold" />
-              </View>
-              <View style={styles.settingsText}>
-                <Text style={styles.settingsTitle}>Configuración</Text>
-                <Text style={styles.settingsSubtitle}>
-                  {settings.floors.length} pisos • Tarifa: S/ {settings.electricityTariffPerKwh}/kWh
+      <FlatList
+        style={styles.scrollView}
+        contentContainerStyle={styles.periodsListContent}
+        showsVerticalScrollIndicator={false}
+        data={isLoading ? [] : periods}
+        keyExtractor={periodKeyExtractor}
+        renderItem={renderPeriodItem}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews={true}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary.main]} />
+        }
+        ListHeaderComponent={
+          <>
+            {offline && (
+              <View style={styles.offlineBanner}>
+                <Text style={styles.offlineText}>
+                  Sin conexión: mostrando datos guardados en el dispositivo
                 </Text>
               </View>
-              <CaretRight size={16} color={colors.textMuted} weight="bold" />
-            </TouchableOpacity>
-          </Animated.View>
-        )}
+            )}
 
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setShowNewPeriodModal(true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.addButtonContent}>
-            <Plus size={20} color={colors.common.white} weight="bold" />
-            <Text style={styles.addButtonText}>Nuevo período</Text>
-          </View>
-        </TouchableOpacity>
-
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Cargando...</Text>
-          </View>
-        ) : periods.length === 0 ? (
-          <Animated.View
-            style={[
-              styles.emptyState,
-              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <View style={styles.emptyIconContainer}>
-              <MagnifyingGlass size={40} color={colors.textMuted} weight="light" />
-            </View>
-            <Text style={styles.emptyTitle}>Sin registros</Text>
-            <Text style={styles.emptyText}>
-              Crea un nuevo período para comenzar a registrar tus gastos
-            </Text>
-          </Animated.View>
-        ) : (
-          <View style={styles.periodsList}>
-            {periods.map((period) => (
+            {settings && (
               <Animated.View
-                key={period.id}
                 style={[
+                  styles.settingsCard,
                   { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
                 ]}
               >
-                <PeriodCard period={period} />
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => navigation.navigate('FloorsConfig')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingsIconContainer}>
+                    <GearSix size={20} color={colors.primary.main} weight="bold" />
+                  </View>
+                  <View style={styles.settingsText}>
+                    <Text style={styles.settingsTitle}>Configuración</Text>
+                    <Text style={styles.settingsSubtitle}>
+                      {settings.floors.length} pisos • Tarifa: S/{settings.electricityTariffPerKwh}/kWh
+                    </Text>
+                  </View>
+                  <CaretRight size={16} color={colors.textMuted} weight="bold" />
+                </TouchableOpacity>
               </Animated.View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setShowNewPeriodModal(true)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.addButtonContent}>
+                <Plus size={20} color={colors.common.white} weight="bold" />
+                <Text style={styles.addButtonText}>Nuevo período</Text>
+              </View>
+            </TouchableOpacity>
+
+            {isLoading && (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Cargando...</Text>
+              </View>
+            )}
+          </>
+        }
+        ListEmptyComponent={
+          !isLoading ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}>
+                <MagnifyingGlass size={40} color={colors.textMuted} weight="light" />
+              </View>
+              <Text style={styles.emptyTitle}>Sin registros</Text>
+              <Text style={styles.emptyText}>
+                Crea un nuevo período para comenzar a registrar tus gastos
+              </Text>
+            </View>
+          ) : null
+        }
+      />
 
       <Modal
         visible={showNewPeriodModal}
@@ -538,10 +685,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[10],
+    flex: 1,
+  },
+  headerTitleTextBlock: {
+    flexShrink: 1,
   },
   headerTitle: {
     ...typography.h3,
     color: colors.common.white,
+    flexShrink: 1,
   },
   headerSubtitle: {
     ...typography.caption,
@@ -587,8 +739,19 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  offlineBanner: {
+    marginTop: spacing[12],
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[12],
+    backgroundColor: '#FFF4E5',
+    borderRadius: borderRadius.sm,
+  },
+  offlineText: {
+    ...typography.caption,
+    color: '#8A5A00',
+    textAlign: 'center',
+  },
   settingsCard: {
-    marginHorizontal: spacing[20],
     marginTop: spacing[16],
     marginBottom: spacing[12],
     backgroundColor: colors.card,
@@ -622,7 +785,6 @@ const styles = StyleSheet.create({
     marginTop: spacing[2],
   },
   addButton: {
-    marginHorizontal: spacing[20],
     marginBottom: spacing[16],
     backgroundColor: colors.primary.main,
     borderRadius: borderRadius.md,
@@ -678,6 +840,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[8],
     gap: spacing[12],
   },
+  periodsListContent: {
+    paddingHorizontal: spacing[20],
+    paddingBottom: spacing[24],
+  },
+  periodItemWrapper: {
+    marginBottom: spacing[12],
+  },
   periodCard: {
     backgroundColor: colors.card,
     borderRadius: borderRadius.xl,
@@ -695,10 +864,14 @@ const styles = StyleSheet.create({
   periodMonth: {
     ...typography.h4,
     color: colors.text,
+    flexShrink: 1,
   },
   periodTotal: {
     ...typography.currency,
     color: colors.primary.main,
+    flexShrink: 1,
+    textAlign: 'right',
+    marginLeft: spacing[8],
   },
   periodDetails: {
     gap: spacing[12],

@@ -9,7 +9,7 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ExpensePeriod, ExpenseSettings, FloorElectricityReading, FloorWaterCost, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_SOURCES } from '../domain/entities/Expense';
+import { ExpensePeriod, ExpenseSettings, FloorElectricityReading, FloorWaterCost, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_SOURCES, normalizeExpensePeriod, normalizeExpenseSettings } from '../domain/entities/Expense';
 
 const GROUP_CODE_KEY = '@group_code';
 const GROUP_NAME_KEY = '@group_name';
@@ -33,21 +33,17 @@ const cleanValue = (value: any): any => {
 };
 
 export const generateGroupCode = (): string => {
-  console.log(`${LOG_PREFIX} generateGroupCode`);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = '';
   for (let i = 0; i < 8; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  console.log(`${LOG_PREFIX} generateGroupCode - code: ${code}`);
   return code;
 };
 
 export const getSavedGroupCode = async (): Promise<string | null> => {
   try {
-    console.log(`${LOG_PREFIX} getSavedGroupCode - ini`);
     const code = await AsyncStorage.getItem(GROUP_CODE_KEY);
-    console.log(`${LOG_PREFIX} getSavedGroupCode - code: ${code}`);
     return code;
   } catch (error) {
     console.error(`${LOG_PREFIX} getSavedGroupCode - error:`, error);
@@ -57,9 +53,7 @@ export const getSavedGroupCode = async (): Promise<string | null> => {
 
 export const getSavedGroupName = async (): Promise<string | null> => {
   try {
-    console.log(`${LOG_PREFIX} getSavedGroupName - ini`);
     const name = await AsyncStorage.getItem(GROUP_NAME_KEY);
-    console.log(`${LOG_PREFIX} getSavedGroupName - name: ${name}`);
     return name;
   } catch (error) {
     console.error(`${LOG_PREFIX} getSavedGroupName - error:`, error);
@@ -69,10 +63,8 @@ export const getSavedGroupName = async (): Promise<string | null> => {
 
 export const saveGroupCode = async (code: string, name: string): Promise<void> => {
   try {
-    console.log(`${LOG_PREFIX} saveGroupCode - ini - code: ${code}, name: ${name}`);
     await AsyncStorage.setItem(GROUP_CODE_KEY, code);
     await AsyncStorage.setItem(GROUP_NAME_KEY, name);
-    console.log(`${LOG_PREFIX} saveGroupCode - ok`);
   } catch (error) {
     console.error(`${LOG_PREFIX} saveGroupCode - error:`, error);
   }
@@ -80,17 +72,14 @@ export const saveGroupCode = async (code: string, name: string): Promise<void> =
 
 export const clearGroupCode = async (): Promise<void> => {
   try {
-    console.log(`${LOG_PREFIX} clearGroupCode - ini`);
     await AsyncStorage.removeItem(GROUP_CODE_KEY);
     await AsyncStorage.removeItem(GROUP_NAME_KEY);
-    console.log(`${LOG_PREFIX} clearGroupCode - ok`);
   } catch (error) {
     console.error(`${LOG_PREFIX} clearGroupCode - error:`, error);
   }
 };
 
 export const createGroup = async (groupName: string, existingSettings?: ExpenseSettings): Promise<string> => {
-  console.log(`${LOG_PREFIX} createGroup - ini - groupName: ${groupName}`);
   const code = generateGroupCode();
   const groupRef = doc(db, 'groups', code);
   
@@ -109,7 +98,6 @@ export const createGroup = async (groupName: string, existingSettings?: ExpenseS
     incomeSources: DEFAULT_INCOME_SOURCES,
   };
   
-  console.log(`${LOG_PREFIX} createGroup - firebase setDoc - code: ${code}`);
   await setDoc(groupRef, {
     name: groupName,
     createdAt: Timestamp.now(),
@@ -117,23 +105,19 @@ export const createGroup = async (groupName: string, existingSettings?: ExpenseS
   });
   
   await saveGroupCode(code, groupName);
-  console.log(`${LOG_PREFIX} createGroup - ok - code: ${code}`);
   return code;
 };
 
 export const joinGroup = async (code: string): Promise<{ success: boolean; name?: string; error?: string }> => {
   try {
-    console.log(`${LOG_PREFIX} joinGroup - ini - code: ${code}`);
     const groupRef = doc(db, 'groups', code.toUpperCase());
     const groupSnap = await getDoc(groupRef);
     
     if (!groupSnap.exists()) {
-      console.log(`${LOG_PREFIX} joinGroup - código no encontrado`);
       return { success: false, error: 'Código no encontrado' };
     }
     
     const groupData = groupSnap.data();
-    console.log(`${LOG_PREFIX} joinGroup - grupo encontrado: ${groupData.name}`);
     await saveGroupCode(code.toUpperCase(), groupData.name);
     
     return { success: true, name: groupData.name };
@@ -145,18 +129,15 @@ export const joinGroup = async (code: string): Promise<{ success: boolean; name?
 
 export const getGroupSettings = async (code: string): Promise<ExpenseSettings | null> => {
   try {
-    console.log(`${LOG_PREFIX} getGroupSettings - ini - code: ${code}`);
     const groupRef = doc(db, 'groups', code);
     const groupSnap = await getDoc(groupRef);
     
     if (!groupSnap.exists()) {
-      console.log(`${LOG_PREFIX} getGroupSettings - no existe`);
       return null;
     }
     
     const data = groupSnap.data();
-    console.log(`${LOG_PREFIX} getGroupSettings - ok`);
-    return data.settings as ExpenseSettings;
+    return normalizeExpenseSettings(data.settings as ExpenseSettings | undefined);
   } catch (error) {
     console.error(`${LOG_PREFIX} getGroupSettings - error:`, error);
     return null;
@@ -164,75 +145,71 @@ export const getGroupSettings = async (code: string): Promise<ExpenseSettings | 
 };
 
 export const updateGroupSettings = async (code: string, settings: ExpenseSettings): Promise<void> => {
-  try {
-    console.log(`${LOG_PREFIX} updateGroupSettings - ini - code: ${code}`);
-    const groupRef = doc(db, 'groups', code);
-    
-    const cleanSettings = cleanValue(settings);
-    if (cleanSettings) {
-      await setDoc(groupRef, { settings: cleanSettings }, { merge: true });
-    }
-    console.log(`${LOG_PREFIX} updateGroupSettings - ok`);
-  } catch (error) {
-    console.error(`${LOG_PREFIX} updateGroupSettings - error:`, error);
+  const groupRef = doc(db, 'groups', code);
+
+  const cleanSettings = cleanValue(settings);
+  if (cleanSettings) {
+    await setDoc(groupRef, { settings: cleanSettings }, { merge: true });
   }
 };
 
 export const savePeriodToCloud = async (groupCode: string, period: ExpensePeriod): Promise<void> => {
-  console.log(`${LOG_PREFIX} savePeriodToCloud - ini - groupCode: ${groupCode}, period: ${period.id}`);
-  try {
-    const periodRef = doc(db, 'groups', groupCode, 'periods', period.id);
-    
-    const cleanPeriod = cleanValue(period);
-    if (cleanPeriod) {
-      await setDoc(periodRef, {
-        ...cleanPeriod,
-        createdAt: Timestamp.fromDate(period.createdAt),
-        updatedAt: Timestamp.fromDate(period.updatedAt),
-      });
-    }
-    console.log(`${LOG_PREFIX} savePeriodToCloud - ok`);
-  } catch (error) {
-    console.error(`${LOG_PREFIX} savePeriodToCloud - error:`, error);
+  const periodRef = doc(db, 'groups', groupCode, 'periods', period.id);
+
+  const cleanPeriod = cleanValue(period);
+  if (cleanPeriod) {
+    await setDoc(periodRef, {
+      ...cleanPeriod,
+      createdAt: Timestamp.fromDate(period.createdAt),
+      updatedAt: Timestamp.fromDate(period.updatedAt),
+    });
   }
 };
 
 export const getPeriodsFromCloud = async (groupCode: string): Promise<ExpensePeriod[]> => {
-  console.log(`${LOG_PREFIX} getPeriodsFromCloud - ini - groupCode: ${groupCode}`);
+  const periodsRef = collection(db, 'groups', groupCode, 'periods');
+  const querySnapshot = await getDocs(periodsRef);
+
+  const periods: ExpensePeriod[] = [];
+  querySnapshot.forEach((doc) => {
+    const data = doc.data();
+    const rawPeriod = {
+      ...data,
+      createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+    };
+    const normalized = normalizeExpensePeriod(rawPeriod);
+    if (normalized.month) {
+      periods.push(normalized);
+    }
+  });
+
+  return periods.sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return parseInt(b.month.split('-')[1]) - parseInt(a.month.split('-')[1]);
+  });
+};
+
+export const getPeriodFromCloud = async (groupCode: string, periodId: string): Promise<ExpensePeriod | null> => {
   try {
-    const periodsRef = collection(db, 'groups', groupCode, 'periods');
-    const querySnapshot = await getDocs(periodsRef);
-    
-    const periods: ExpensePeriod[] = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      periods.push({
-        ...data,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-      } as ExpensePeriod);
-    });
-    
-    console.log(`${LOG_PREFIX} getPeriodsFromCloud - found: ${periods.length}`);
-    return periods.sort((a, b) => {
-      if (a.year !== b.year) return b.year - a.year;
-      return parseInt(b.month.split('-')[1]) - parseInt(a.month.split('-')[1]);
-    });
+    const periodRef = doc(db, 'groups', groupCode, 'periods', periodId);
+    const snap = await getDoc(periodRef);
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    const rawPeriod = {
+      ...data,
+      createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+    };
+    return normalizeExpensePeriod(rawPeriod);
   } catch (error) {
-    console.error(`${LOG_PREFIX} getPeriodsFromCloud - error:`, error);
-    return [];
+    return null;
   }
 };
 
 export const deletePeriodFromCloud = async (groupCode: string, periodId: string): Promise<void> => {
-  console.log(`${LOG_PREFIX} deletePeriodFromCloud - ini - groupCode: ${groupCode}, periodId: ${periodId}`);
-  try {
-    const periodRef = doc(db, 'groups', groupCode, 'periods', periodId);
-    await deleteDoc(periodRef);
-    console.log(`${LOG_PREFIX} deletePeriodFromCloud - ok`);
-  } catch (error) {
-    console.error(`${LOG_PREFIX} deletePeriodFromCloud - error:`, error);
-  }
+  const periodRef = doc(db, 'groups', groupCode, 'periods', periodId);
+  await deleteDoc(periodRef);
 };
 
 export const migrateLocalDataToCloud = async (
@@ -240,17 +217,19 @@ export const migrateLocalDataToCloud = async (
   periods: ExpensePeriod[],
   settings: ExpenseSettings
 ): Promise<void> => {
-  console.log(`${LOG_PREFIX} migrateLocalDataToCloud - ini - groupCode: ${groupCode}, periods: ${periods.length}`);
   try {
     await updateGroupSettings(groupCode, settings);
-    console.log(`${LOG_PREFIX} migrateLocalDataToCloud - settings guardados`);
-    
-    for (const period of periods) {
-      await savePeriodToCloud(groupCode, period);
-    }
-    console.log(`${LOG_PREFIX} migrateLocalDataToCloud - ok`);
   } catch (error) {
-    console.error(`${LOG_PREFIX} migrateLocalDataToCloud - error:`, error);
-    console.error('Error migrating data:', error);
+    console.error(`${LOG_PREFIX} migrateLocalDataToCloud - error guardando settings:`, error);
+  }
+
+  let savedCount = 0;
+  for (const period of periods) {
+    try {
+      await savePeriodToCloud(groupCode, period);
+      savedCount++;
+    } catch (error) {
+      console.error(`${LOG_PREFIX} migrateLocalDataToCloud - error período ${period.id}:`, error);
+    }
   }
 };

@@ -12,14 +12,11 @@ const PAYMENT_REMINDER_MINUTE = '@payment_reminder_minute';
 const PAYMENT_REMINDER_DAYS = '@payment_reminder_days';
 
 const initNotifications = async () => {
-  console.log(`${LOG_PREFIX} initNotifications - ini - isInitialized: ${isInitialized}`);
   if (isInitialized) {
-    console.log(`${LOG_PREFIX} initNotifications - ya inicializado`);
     return;
   }
   
   try {
-    console.log(`${LOG_PREFIX} initNotifications - configurando handler`);
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldPlaySound: true,
@@ -126,14 +123,12 @@ export const schedulePaymentReminders = async (): Promise<void> => {
     
     const hasPermission = await requestNotificationPermissions();
     if (!hasPermission) {
-      console.log('No notification permissions for payment reminders');
       return;
     }
 
     const settings = await getPaymentReminderSettings();
     
     if (!settings.enabled) {
-      console.log('Payment reminders disabled');
       return;
     }
 
@@ -194,7 +189,6 @@ export const schedulePaymentReminders = async (): Promise<void> => {
       }
     }
 
-    console.log('✅ Payment reminders scheduled');
   } catch (error) {
     console.error('Error scheduling payment reminders:', error);
   }
@@ -209,7 +203,6 @@ export const cancelPaymentReminders = async (): Promise<void> => {
         await Notifications.cancelScheduledNotificationAsync(notification.identifier);
       }
     }
-    console.log('Payment reminders cancelled');
   } catch (error) {
     console.error('Error cancelling payment reminders:', error);
   }

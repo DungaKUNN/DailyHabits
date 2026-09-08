@@ -18,8 +18,7 @@ import {
 } from 'phosphor-react-native';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
-import { getDatabase } from '../../data/Database';
+import { getFinanceRepo } from '../../data/repos';
 import { FinancePeriod, FinanceIncome, FinanceExpense, FinanceDebt } from '../../domain/entities/Finance';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -63,23 +62,14 @@ export const FinanceDetailScreen: React.FC = () => {
   const [payDebtData, setPayDebtData] = useState<{ index: number; name: string; monthlyPayment: number; remainingAmount: number } | null>(null);
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadPeriod();
-    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadPeriod = async () => {
-    console.log(`${LOG_PREFIX} loadPeriod - ini - periodId: ${periodId}`);
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const p = await repo.getPeriodById(periodId);
-      console.log(`${LOG_PREFIX} loadPeriod - found: ${!!p}`);
       if (p) {
-        console.log(`${LOG_PREFIX} loadPeriod - period: ${p.month} ${p.year}`);
-        console.log(`${LOG_PREFIX} loadPeriod - income: ${p.income.length} items`);
-        console.log(`${LOG_PREFIX} loadPeriod - expenses: ${p.expenses.length} items`);
-        console.log(`${LOG_PREFIX} loadPeriod - debts: ${p.debts.length} items`);
-        console.log(`${LOG_PREFIX} loadPeriod - savings: ${p.savings}`);
         setPeriod(p);
       }
     } catch (error) {
@@ -105,17 +95,11 @@ export const FinanceDetailScreen: React.FC = () => {
     }
 
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       if (addType === 'income') {
         await repo.updatePeriod(period.id, { income: [...period.income, { id: Date.now().toString(), source: selectedSource, amount }] });
-        console.log('======= AGREGAR INGRESO =======');
-        console.log('Added income - source:', selectedSource, 'amount:', amount);
-        console.log('======= FIN AGREGAR INGRESO =======');
       } else if (addType === 'expense') {
         await repo.updatePeriod(period.id, { expenses: [...period.expenses, { id: Date.now().toString(), category: selectedCategory, subcategory: selectedCategory, amount, isFixed: false }] });
-        console.log('======= AGREGAR GASTO =======');
-        console.log('Added expense - category:', selectedCategory, 'amount:', amount);
-        console.log('======= FIN AGREGAR GASTO =======');
       }
 
       setShowAddModal(false);
@@ -140,13 +124,10 @@ export const FinanceDetailScreen: React.FC = () => {
     }
 
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const currentSavings = period.savings || 0;
       await repo.updatePeriod(period.id, { savings: currentSavings + amount });
       
-      console.log('======= GUARDAR AHORRO =======');
-      console.log('Added savings - previous:', currentSavings, 'added:', amount, 'new total:', currentSavings + amount);
-      console.log('======= FIN GUARDAR AHORRO =======');
       
       setShowSavingsModal(false);
       setNewSavings('');
@@ -177,7 +158,7 @@ export const FinanceDetailScreen: React.FC = () => {
     }
 
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const monthlyPayment = amount / monthsInput;
       
       const newDebt: FinanceDebt = {
@@ -193,9 +174,6 @@ export const FinanceDetailScreen: React.FC = () => {
       // Guardar la deuda en el período actual
       await repo.updatePeriod(period.id, { debts: [...period.debts, newDebt] });
       
-      console.log('======= AGREGAR DEUDA =======');
-      console.log(`${LOG_PREFIX} Debt created - name: "${newDebt.name}", amount: ${newDebt.totalAmount}, monthly: ${newDebt.monthlyPayment}, months: ${monthsInput}`);
-      console.log(`${LOG_PREFIX} Current period: ${period.monthName} ${period.year}`);
 
       // Obtener todos los períodos y ordenarlos por fecha
       const allPeriods = await repo.getAllPeriods();
@@ -209,21 +187,17 @@ export const FinanceDetailScreen: React.FC = () => {
       
       const currentIndex = sortedPeriods.findIndex(p => p.id === period.id);
       
-      console.log(`${LOG_PREFIX} Total periods: ${sortedPeriods.length}, currentIndex: ${currentIndex}`);
       
       // NO copiar a meses anteriores - la deuda solo existe desde el mes actual hacia adelante
-      console.log(`${LOG_PREFIX} Skipping past months (debt starts from current month only)`);
       
       // Copiar a meses futuros que ya existen
       let futureCopies = 0;
       for (let i = 1; i <= monthsInput; i++) {
         if (currentIndex + i >= sortedPeriods.length) {
-          console.log(`${LOG_PREFIX} Future period index ${currentIndex + i} doesn't exist yet - will propagate when created via createPeriod`);
           break;
         }
         
         const futurePeriod = sortedPeriods[currentIndex + i];
-        console.log(`${LOG_PREFIX} Copying debt to future period: ${futurePeriod.monthName} ${futurePeriod.year}`);
         
         const futureDebt: FinanceDebt = {
           ...newDebt,
@@ -242,8 +216,6 @@ export const FinanceDetailScreen: React.FC = () => {
         }
       }
       
-      console.log(`${LOG_PREFIX} Debt copied to ${futureCopies} existing future periods`);
-      console.log(`======= FIN AGREGAR DEUDA =======`);
 
       setShowDebtModal(false);
       setNewAmount('');
@@ -270,7 +242,7 @@ export const FinanceDetailScreen: React.FC = () => {
     const debt = period.debts[payDebtData.index];
     
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const updatedDebts = [...period.debts];
       const newRemaining = debt.remainingAmount - debt.monthlyPayment;
       
@@ -333,7 +305,7 @@ export const FinanceDetailScreen: React.FC = () => {
     
     const handleDelete = async () => {
       try {
-        const repo = new SQLiteFinanceRepository(getDatabase());
+        const repo = getFinanceRepo();
         if (type === 'income') {
           const newIncome = [...period.income];
           newIncome.splice(index, 1);
@@ -374,7 +346,7 @@ export const FinanceDetailScreen: React.FC = () => {
   const confirmDeleteSavings = async () => {
     if (!period) return;
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       await repo.updatePeriod(period.id, { savings: 0 });
       await loadPeriod();
     } catch (error) {
@@ -396,7 +368,7 @@ export const FinanceDetailScreen: React.FC = () => {
 
   const totalIncome = period.income.reduce((sum, i) => sum + i.amount, 0);
   const totalExpenses = period.expenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalDebts = period.debts.filter(d => !d.isPaid && !d.paidThisMonth).reduce((sum, d) => sum + d.monthlyPayment, 0);
+  const totalDebts = period.debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.monthlyPayment, 0);
   const totalDebtRemaining = period.debts.reduce((sum, d) => sum + d.remainingAmount, 0);
   const totalSavings = period.savings || 0;
   const balance = totalIncome - totalExpenses - totalDebts;
@@ -937,6 +909,7 @@ const styles = StyleSheet.create({
   },
   summaryValue: {
     ...typography.currency,
+    flexShrink: 1,
   },
   incomeValue: {
     color: colors.accent.green,
@@ -956,14 +929,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing[12],
   },
   debtLabel: {
     ...typography.captionMedium,
     color: colors.warning,
     marginLeft: spacing[4],
+    flexShrink: 1,
   },
   debtValue: {
     color: colors.warning,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   actionsCard: {
     marginHorizontal: spacing[20],
@@ -1017,6 +994,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flexShrink: 1,
   },
   sectionIconContainer: {
     width: 28,
@@ -1028,6 +1006,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...typography.label,
     color: colors.text,
+    flexShrink: 1,
   },
   sectionCount: {
     ...typography.caption,

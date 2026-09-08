@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Dimensions, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, StatusBar } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -7,14 +7,97 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Wallet, Plus, CurrencyDollar, Trash, CaretRight } from 'phosphor-react-native';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { SQLiteFinanceRepository } from '../../data/repositories/SQLiteFinanceRepository';
-import { getDatabase } from '../../data/Database';
+import { getFinanceRepo } from '../../data/repos';
 import { FinancePeriod } from '../../domain/entities/Finance';
 import { formatCurrency, MONTHS } from '../../utils/formatting';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-const { width } = Dimensions.get('window');
 
-const LOG_PREFIX = '[FinancesTabScreen]';
+const getTotals = (period: FinancePeriod) => {
+  const totalIncome = period.income.reduce((sum, i) => sum + i.amount, 0);
+  const totalExpenses = period.expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalDebts = period.debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.monthlyPayment, 0);
+  return {
+    totalIncome,
+    totalExpenses,
+    totalDebts,
+    total: totalIncome - totalExpenses - totalDebts
+  };
+};
+
+const PeriodCard = React.memo<{ period: FinancePeriod; onPress: (p: FinancePeriod) => void; onDelete: (p: FinancePeriod) => void }>(({ period, onPress, onDelete }) => {
+  const { totalIncome, totalExpenses, totalDebts } = getTotals(period);
+  const balance = totalIncome - totalExpenses - totalDebts;
+  const isPositive = balance >= 0;
+
+  return (
+    <TouchableOpacity
+      style={styles.periodCard}
+      onPress={() => onPress(period)}
+      onLongPress={() => onDelete(period)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.periodCardContent}>
+        <View style={styles.periodHeader}>
+          <View style={styles.periodHeaderLeft}>
+            <View style={styles.periodIconContainer}>
+              <Wallet size={24} color={colors.primary.main} weight="fill" />
+            </View>
+            <View>
+              <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName}</Text>
+              <Text style={styles.periodYear}>{period.year}</Text>
+            </View>
+          </View>
+          <View style={styles.periodHeaderRight}>
+            <Text style={[styles.periodBalance, isPositive ? styles.balancePositive : styles.balanceNegative]} numberOfLines={1}>
+              {isPositive ? '+' : ''}{formatCurrency(balance)}
+            </Text>
+            <CaretRight size={16} color={colors.textMuted} weight="bold" />
+          </View>
+        </View>
+
+        <View style={styles.periodDivider} />
+
+        <View style={styles.periodDetails}>
+          <View style={styles.periodDetail}>
+            <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.green }]} />
+            <View style={styles.periodDetailContent}>
+              <Text style={styles.periodDetailLabel}>Ingresos</Text>
+              <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalIncome)}</Text>
+            </View>
+            <Text style={styles.periodDetailCount}>{period.income.length}</Text>
+          </View>
+
+          <View style={styles.periodDetail}>
+            <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.red }]} />
+            <View style={styles.periodDetailContent}>
+              <Text style={styles.periodDetailLabel}>Gastos</Text>
+              <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalExpenses)}</Text>
+            </View>
+            <Text style={styles.periodDetailCount}>{period.expenses.length}</Text>
+          </View>
+
+          <View style={styles.periodDetail}>
+            <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.orange }]} />
+            <View style={styles.periodDetailContent}>
+              <Text style={styles.periodDetailLabel}>Deudas</Text>
+              <Text style={styles.periodDetailValue} numberOfLines={1}>
+                {totalDebts > 0 ? formatCurrency(totalDebts) : 'Sin deudas'}
+              </Text>
+            </View>
+            <Text style={styles.periodDetailCount}>
+              {period.debts.filter(d => !d.paidThisMonth).length}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.periodFooter}>
+          <Text style={styles.tapHint}>Mantén presionado para eliminar</Text>
+          <Trash size={14} color={colors.textMuted} weight="light" />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 const FinancesTabScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -37,31 +120,18 @@ const FinancesTabScreen: React.FC = () => {
 
   const loadFinanceData = async () => {
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const periods = await repo.getAllPeriods();
-      console.log('======= loadFinanceData =======');
-      console.log('Total periods loaded:', periods.length);
-      periods.forEach((p, idx) => {
-        const totalIncome = p.income.reduce((sum, i) => sum + i.amount, 0);
-        const totalExpenses = p.expenses.reduce((sum, e) => sum + e.amount, 0);
-        console.log(`Period[${idx}]: ${p.month} ${p.year} - Income: ${totalIncome}, Expenses: ${totalExpenses}, Debts: ${p.debts.length}`);
-      });
-      console.log('======= FIN loadFinanceData =======');
       setFinancePeriods(periods);
     } catch (error) {
       console.error('Error loading finance data:', error);
     }
   };
 
-  const deletePeriod = async (period: FinancePeriod) => {
-    setDeleteTarget(period);
-    setDeleteDialogVisible(true);
-  };
-
   const confirmDeletePeriod = async () => {
     if (!deleteTarget) return;
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       await repo.deletePeriod(deleteTarget.id);
       await loadFinanceData();
     } catch (error) {
@@ -74,7 +144,7 @@ const FinancesTabScreen: React.FC = () => {
 
   const createPeriod = async (year: number, month: number) => {
     try {
-      const repo = new SQLiteFinanceRepository(getDatabase());
+      const repo = getFinanceRepo();
       const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
       const exists = await repo.getPeriodByMonth(monthStr);
       if (exists) {
@@ -93,15 +163,10 @@ const FinancesTabScreen: React.FC = () => {
         notes: '',
       });
       
-      console.log('======= createPeriod =======');
-      console.log(`${LOG_PREFIX} Created new period: ${newPeriod.monthName} ${newPeriod.year}`);
-      
       const allPeriods = await repo.getAllPeriods();
-      console.log(`${LOG_PREFIX} Total periods now: ${allPeriods.length}`);
-      
+
       const debtsToCopy: typeof newPeriod.debts = [];
-      let debtsFromCount = 0;
-      
+
       for (const period of allPeriods) {
         if (period.year > year || (period.year === year && parseInt(period.month.split('-')[1]) > month + 1)) {
           break;
@@ -109,7 +174,6 @@ const FinancesTabScreen: React.FC = () => {
         
         for (const debt of period.debts) {
           if (!debt.isPaid && debt.remainingAmount > 0) {
-            debtsFromCount++;
             const prevMonth = parseInt(period.month.split('-')[1]) - 1;
             const monthDiff = (year - period.year) * 12 + (month - prevMonth);
             
@@ -132,13 +196,10 @@ const FinancesTabScreen: React.FC = () => {
         }
       }
       
-      console.log(`${LOG_PREFIX} Found ${debtsFromCount} unpaid debts in previous periods, copying ${debtsToCopy.length} to new month`);
       if (debtsToCopy.length > 0) {
         await repo.updatePeriod(newPeriod.id, { debts: debtsToCopy });
-        debtsToCopy.forEach(d => console.log(`${LOG_PREFIX}   Copied debt: "${d.name}" - ${d.remainingAmount}`));
       }
-      console.log(`======= FIN createPeriod =======`);
-      
+
       await loadFinanceData();
       setShowMonthModal(false);
       setSelectedYear(year);
@@ -147,102 +208,25 @@ const FinancesTabScreen: React.FC = () => {
     }
   };
 
-  const getTotals = (period: FinancePeriod) => {
-    const totalIncome = period.income.reduce((sum, i) => sum + i.amount, 0);
-    const totalExpenses = period.expenses.reduce((sum, e) => sum + e.amount, 0);
-    const totalDebts = period.debts.filter(d => !d.paidThisMonth).reduce((sum, d) => sum + d.monthlyPayment, 0);
-    return {
-      totalIncome,
-      totalExpenses,
-      totalDebts,
-      total: totalIncome - totalExpenses - totalDebts
-    };
-  };
-
   const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
-  const filteredPeriods = financePeriods.filter(p => p.year === selectedYear);
-  const sortedPeriods = [...filteredPeriods].sort((a, b) => {
-    const monthA = parseInt(a.month.split('-')[1]);
-    const monthB = parseInt(b.month.split('-')[1]);
-    return monthB - monthA;
-  });
+  const sortedPeriods = React.useMemo(() => {
+    const filtered = financePeriods.filter(p => p.year === selectedYear);
+    return [...filtered].sort((a, b) => {
+      const monthA = parseInt(a.month.split('-')[1]);
+      const monthB = parseInt(b.month.split('-')[1]);
+      return monthB - monthA;
+    });
+  }, [financePeriods, selectedYear]);
 
-  const PeriodCard = React.memo<{ period: FinancePeriod }>(({ period }) => {
-    const { totalIncome, totalExpenses, totalDebts } = getTotals(period);
-    const balance = totalIncome - totalExpenses - totalDebts;
-    const isPositive = balance >= 0;
-    
-    return (
-      <TouchableOpacity
-        style={styles.periodCard}
-        onPress={() => navigation.navigate('FinanceDetail', { periodId: period.id })}
-        onLongPress={() => deletePeriod(period)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.periodCardContent}>
-          <View style={styles.periodHeader}>
-            <View style={styles.periodHeaderLeft}>
-              <View style={styles.periodIconContainer}>
-                <Wallet size={24} color={colors.primary.main} weight="fill" />
-              </View>
-              <View>
-                <Text style={styles.periodMonth} numberOfLines={1}>{period.monthName}</Text>
-                <Text style={styles.periodYear}>{period.year}</Text>
-              </View>
-            </View>
-            <View style={styles.periodHeaderRight}>
-              <Text style={[styles.periodBalance, isPositive ? styles.balancePositive : styles.balanceNegative]} numberOfLines={1}>
-                {isPositive ? '+' : ''}{formatCurrency(balance)}
-              </Text>
-              <CaretRight size={16} color={colors.textMuted} weight="bold" />
-            </View>
-          </View>
-          
-          <View style={styles.periodDivider} />
-          
-          <View style={styles.periodDetails}>
-            <View style={styles.periodDetail}>
-              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.green }]} />
-              <View style={styles.periodDetailContent}>
-                <Text style={styles.periodDetailLabel}>Ingresos</Text>
-                <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalIncome)}</Text>
-              </View>
-              <Text style={styles.periodDetailCount}>{period.income.length}</Text>
-            </View>
-            
-            <View style={styles.periodDetail}>
-              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.red }]} />
-              <View style={styles.periodDetailContent}>
-                <Text style={styles.periodDetailLabel}>Gastos</Text>
-                <Text style={styles.periodDetailValue} numberOfLines={1}>{formatCurrency(totalExpenses)}</Text>
-              </View>
-              <Text style={styles.periodDetailCount}>{period.expenses.length}</Text>
-            </View>
+  const handlePressPeriod = useCallback((period: FinancePeriod) => {
+    navigation.navigate('FinanceDetail', { periodId: period.id });
+  }, [navigation]);
 
-            <View style={styles.periodDetail}>
-              <View style={[styles.periodDetailDot, { backgroundColor: colors.accent.orange }]} />
-              <View style={styles.periodDetailContent}>
-                <Text style={styles.periodDetailLabel}>Deudas</Text>
-                <Text style={styles.periodDetailValue} numberOfLines={1}>
-                  {totalDebts > 0 ? formatCurrency(totalDebts) : 'Sin deudas'}
-                </Text>
-              </View>
-              <Text style={styles.periodDetailCount}>
-                {period.debts.filter(d => !d.paidThisMonth).length}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.periodFooter}>
-            <Text style={styles.tapHint}>Mantén presionado para eliminar</Text>
-            <Trash size={14} color={colors.textMuted} weight="light" />
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  });
+  const handleDeletePeriod = useCallback((period: FinancePeriod) => {
+    setDeleteTarget(period);
+    setDeleteDialogVisible(true);
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -301,7 +285,7 @@ const FinancesTabScreen: React.FC = () => {
           </View>
         ) : (
           sortedPeriods.map((period) => (
-            <PeriodCard key={period.id} period={period} />
+            <PeriodCard key={period.id} period={period} onPress={handlePressPeriod} onDelete={handleDeletePeriod} />
           ))
         )}
 
@@ -504,6 +488,7 @@ const styles = StyleSheet.create({
   periodMonth: {
     ...typography.h4,
     color: colors.text,
+    flexShrink: 1,
   },
   periodYear: {
     ...typography.caption,
@@ -514,9 +499,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flexShrink: 1,
   },
   periodBalance: {
     ...typography.currency,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   balancePositive: {
     color: colors.accent.green,

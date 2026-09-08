@@ -33,8 +33,7 @@ import {
   joinGroup,
   migrateLocalDataToCloud,
 } from '../../services/SyncService';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { getDatabase } from '../../data/Database';
+import { getExpenseRepo } from '../../data/repos';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
 
@@ -69,7 +68,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGroupReady }) => {
 
     setLoading(true);
     try {
-      const repo = new SQLiteExpenseRepository(getDatabase());
+      const repo = getExpenseRepo();
       const [localPeriods, localSettings] = await Promise.all([
         repo.getAllPeriods(),
         repo.getSettings(),

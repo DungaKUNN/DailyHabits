@@ -26,8 +26,7 @@ import {
   PencilSimple,
 } from 'phosphor-react-native';
 import { ExpenseSettings, Floor, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_SOURCES } from '../../domain/entities/Expense';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { getDatabase } from '../../data/Database';
+import { getExpenseRepo } from '../../data/repos';
 import { getSavedGroupCode, updateGroupSettings, getGroupSettings } from '../../services/SyncService';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -225,7 +224,7 @@ const FloorInputCard: React.FC<FloorInputProps> = React.memo(({
           <View style={styles.defaultIgvRow}>
             <GearSix size={14} color={colors.textMuted} weight="regular" />
             <Text style={styles.defaultIgvText} numberOfLines={2}>
-              IGV: {globalIgv}% (global) • Cargo fijo: S/ {fixedCharge || '0'}
+              IGV: {globalIgv}% (global) • Cargo fijo: S/{fixedCharge || '0'}
             </Text>
           </View>
         )}
@@ -291,22 +290,16 @@ const FloorsConfigScreen: React.FC = () => {
   const [feedbackData, setFeedbackData] = useState<{ title: string; message: string; variant: 'success' | 'info' } | null>(null);
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadSettings();
-    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadSettings = async () => {
-    console.log(`${LOG_PREFIX} loadSettings - ini`);
     try {
       const code = await getSavedGroupCode();
-      console.log(`${LOG_PREFIX} loadSettings - code: ${code}`);
       setGroupCode(code);
 
       if (code) {
-        console.log(`${LOG_PREFIX} loadSettings - cargando desde cloud`);
         const cloudSettings = await getGroupSettings(code);
-        console.log(`${LOG_PREFIX} loadSettings - cloudSettings: ${!!cloudSettings}`);
         if (cloudSettings && cloudSettings.floors) {
           setSettings(cloudSettings);
           setTariff((cloudSettings.electricityTariffPerKwh ?? 0.66).toString());
@@ -318,8 +311,7 @@ const FloorsConfigScreen: React.FC = () => {
           setShowCustomIgv(hasCustomIgv);
         }
       } else {
-        console.log(`${LOG_PREFIX} loadSettings - cargando desde local`);
-        const repo = new SQLiteExpenseRepository(getDatabase());
+        const repo = getExpenseRepo();
         const settingsData = await repo.getSettings();
         setSettings(settingsData);
         setTariff((settingsData.electricityTariffPerKwh ?? 0.66).toString());
@@ -346,7 +338,7 @@ const FloorsConfigScreen: React.FC = () => {
       if (groupCode) {
         await updateGroupSettings(groupCode, finalSettings);
       } else {
-        const repo = new SQLiteExpenseRepository(getDatabase());
+        const repo = getExpenseRepo();
         await repo.updateSettings(finalSettings);
       }
       setHasChanges(false);
@@ -560,7 +552,7 @@ const FloorsConfigScreen: React.FC = () => {
                   <Drop size={14} color={colors.accent.blue} weight="fill" />
                   <Text style={styles.waterSummaryLabel}>Total montos fijos</Text>
                 </View>
-                <Text style={styles.waterSummaryValue}>S/ {totalWaterFixed.toFixed(2)}</Text>
+                <Text style={styles.waterSummaryValue}>S/{totalWaterFixed.toFixed(2)}</Text>
               </View>
               <View style={styles.waterSummaryDivider} />
               <View style={styles.waterSummaryRow}>
@@ -689,11 +681,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing[12],
+    gap: spacing[8],
   },
   sectionLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flexShrink: 1,
   },
   sectionTitle: {
     ...typography.h4,
@@ -783,19 +777,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing[4],
+    gap: spacing[12],
   },
   waterSummaryLabelContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[6],
+    flexShrink: 1,
   },
   waterSummaryLabel: {
     ...typography.bodySmall,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   waterSummaryValue: {
     ...typography.currencySmall,
     color: colors.success,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   waterSummaryError: {
     color: colors.error,

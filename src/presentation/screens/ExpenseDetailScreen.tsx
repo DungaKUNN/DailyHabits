@@ -26,15 +26,15 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Lightning, Drop, House, Camera, FileText, Calculator, Export, Check, X, Trash, CaretRight } from 'phosphor-react-native';
 import { ExpensePeriod, ExpenseSettings, FloorElectricityReading, FloorWaterCost, ReceiptPhoto } from '../../domain/entities/Expense';
-import { SQLiteExpenseRepository } from '../../data/repositories/SQLiteExpenseRepository';
-import { getDatabase } from '../../data/Database';
-import { getSavedGroupCode, savePeriodToCloud, getPeriodsFromCloud, getGroupSettings } from '../../services/SyncService';
+import { getExpenseRepo } from '../../data/repos';
+import { getSavedGroupCode, savePeriodToCloud, getPeriodsFromCloud, getPeriodFromCloud, getGroupSettings } from '../../services/SyncService';
 import { colors, spacing, borderRadius, shadows } from '../theme/colors';
 import { typography } from '../theme/typography';
 import { storage } from '../../services/firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { DecimalInput } from '../components/DecimalInput';
 import { formatCurrency } from '../../utils/formatting';
+import { calculateElectricity, calculateWater, round2 } from '../../utils/calculations';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type ExpenseDetailRouteParams = {
@@ -44,6 +44,116 @@ type ExpenseDetailRouteParams = {
 };
 
 const LOG_PREFIX = '[ExpenseDetailScreen]';
+
+interface FloorElectricityCardProps {
+  floorId: string;
+  floorName: string;
+  floorData: FloorElectricityReading;
+  displayPrevious: string;
+  displayCurrent: string;
+  paysSurplus: boolean;
+  onReadingChange: (floorId: string, field: 'previousReading' | 'currentReading', value: string) => void;
+  onToggleSurplus: (floorId: string) => void;
+}
+
+// Memoizada y fuera del componente: al escribir la lectura de un piso,
+// los demás pisos NO se re-renderizan (antes toda la pantalla se
+// reconstruía en cada tecla). Solo se vuelve a dibujar si cambian sus props.
+const FloorElectricityCard = React.memo<FloorElectricityCardProps>(({
+  floorId,
+  floorName,
+  floorData,
+  displayPrevious,
+  displayCurrent,
+  paysSurplus,
+  onReadingChange,
+  onToggleSurplus,
+}) => (
+  <View style={styles.floorCard}>
+    <View style={styles.floorCardHeader}>
+      <House size={16} color={colors.textSecondary} weight="duotone" />
+      <Text style={styles.floorName} numberOfLines={1}>{floorName}</Text>
+    </View>
+
+    <View style={styles.readingRow}>
+      <View style={styles.readingInput}>
+        <Text style={styles.readingLabel}>Lect. Anterior</Text>
+        <DecimalInput
+          style={styles.input}
+          value={displayPrevious}
+          onChangeText={(v) => onReadingChange(floorId, 'previousReading', v)}
+          placeholder="0"
+        />
+      </View>
+      <View style={styles.readingInput}>
+        <Text style={styles.readingLabel}>Lect. Actual</Text>
+        <DecimalInput
+          style={styles.input}
+          value={displayCurrent}
+          onChangeText={(v) => onReadingChange(floorId, 'currentReading', v)}
+          placeholder="0"
+        />
+      </View>
+    </View>
+
+    <View style={styles.resultGrid}>
+      <View style={styles.resultItem}>
+        <Text style={styles.resultLabel}>Consumo</Text>
+        <Text style={styles.resultValue} numberOfLines={1}>{floorData.realReading.toFixed(1)} kWh</Text>
+      </View>
+      <View style={styles.resultDivider} />
+      <View style={styles.resultItem}>
+        <Text style={styles.resultLabel}>Costo</Text>
+        <Text style={styles.resultValue} numberOfLines={1}>{formatCurrency(floorData.consumptionPrice)}</Text>
+      </View>
+      <View style={styles.resultDivider} />
+      <View style={styles.resultItem}>
+        <Text style={styles.resultLabel}>IGV</Text>
+        <Text style={styles.resultValue} numberOfLines={1}>{formatCurrency(floorData.igv)}</Text>
+      </View>
+    </View>
+
+    {(floorData.fixedCharge > 0) && (
+      <View style={styles.fixedChargeRow}>
+        <Text style={styles.fixedChargeLabel}>Cargo fijo</Text>
+        <Text style={styles.fixedChargeValue}>{formatCurrency(floorData.fixedCharge)}</Text>
+      </View>
+    )}
+
+    <TouchableOpacity
+      style={[
+        styles.surplusToggle,
+        paysSurplus && styles.surplusToggleActive
+      ]}
+      onPress={() => onToggleSurplus(floorId)}
+      activeOpacity={0.7}
+    >
+      {paysSurplus ? (
+        <Check size={14} color={colors.primary.main} weight="bold" />
+      ) : (
+        <View style={styles.surplusCheckEmpty} />
+      )}
+      <Text style={[
+        styles.surplusToggleText,
+        paysSurplus && styles.surplusToggleTextActive
+      ]}>
+        {paysSurplus ? 'Paga excedente' : 'No paga excedente'}
+      </Text>
+    </TouchableOpacity>
+
+    {floorData.surplus > 0 && (
+      <View style={styles.surplusRow}>
+        <Text style={styles.surplusLabel}>Excedente</Text>
+        <Text style={styles.surplusValue}>{formatCurrency(floorData.surplus)}</Text>
+      </View>
+    )}
+
+    <View style={styles.totalRow}>
+      <Text style={styles.totalLabel}>TOTAL A PAGAR</Text>
+      <Text style={styles.totalValue}>{formatCurrency(floorData.totalToPay)}</Text>
+    </View>
+  </View>
+));
 
 const ExpenseDetailScreen: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<any>>();
@@ -74,7 +184,6 @@ const ExpenseDetailScreen: React.FC = () => {
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    console.log(`${LOG_PREFIX} useEffect - ini`);
     loadGroupCode();
     loadData();
     Animated.timing(fadeAnim, {
@@ -82,14 +191,32 @@ const ExpenseDetailScreen: React.FC = () => {
       duration: 400,
       useNativeDriver: true,
     }).start();
-    console.log(`${LOG_PREFIX} useEffect - fin`);
   }, []);
 
   const loadGroupCode = async () => {
-    console.log(`${LOG_PREFIX} loadGroupCode - ini`);
     const code = await getSavedGroupCode();
-    console.log(`${LOG_PREFIX} loadGroupCode - code: ${code}`);
     setGroupCode(code);
+  };
+
+  const applyPeriodData = (periodData: ExpensePeriod) => {
+    setPeriod(periodData);
+    setTotalReceiptElectricity(periodData.electricity.totalReceipt.toString());
+    setTotalReceiptWater(periodData.water.totalReceipt.toString());
+
+    const readings: Record<string, { previous: string; current: string }> = {};
+    periodData.floorsElectricity.forEach(f => {
+      readings[f.floorId] = {
+        previous: f.previousReading.toString(),
+        current: f.currentReading.toString(),
+      };
+    });
+    setFloorReadings(readings);
+
+    const floorsPaying = new Set<string>();
+    periodData.floorsElectricity.forEach(f => {
+      if (f.paysSurplus) floorsPaying.add(f.floorId);
+    });
+    setFloorsPayingSurplus(floorsPaying);
   };
 
   const loadData = async () => {
@@ -98,18 +225,31 @@ const ExpenseDetailScreen: React.FC = () => {
       let periodId = route.params.periodId;
       const code = await getSavedGroupCode();
 
+      const repo = getExpenseRepo();
+
       if (periodId === 'latest' || periodId === 'current') {
         if (code) {
-          const periods = await getPeriodsFromCloud(code);
-          if (periods.length > 0) {
-            periodId = periods[0].id;
-          } else {
-            setNoData(true);
-            setLoading(false);
-            return;
+          try {
+            const periods = await getPeriodsFromCloud(code);
+            if (periods.length > 0) {
+              periodId = periods[0].id;
+            } else {
+              setNoData(true);
+              setLoading(false);
+              return;
+            }
+          } catch (error) {
+            console.error('Error leyendo cloud para latest, usando local:', error);
+            const latest = await repo.getLatestPeriod();
+            if (latest) {
+              periodId = latest.id;
+            } else {
+              setNoData(true);
+              setLoading(false);
+              return;
+            }
           }
         } else {
-          const repo = new SQLiteExpenseRepository(getDatabase());
           const latest = await repo.getLatestPeriod();
           if (latest) {
             periodId = latest.id;
@@ -122,61 +262,61 @@ const ExpenseDetailScreen: React.FC = () => {
       }
 
       if (code) {
-        const periods = await getPeriodsFromCloud(code);
-        const periodData = periods.find(p => p.id === periodId);
-        if (periodData) {
-          setPeriod(periodData);
-          setTotalReceiptElectricity(periodData.electricity.totalReceipt.toString());
-          setTotalReceiptWater(periodData.water.totalReceipt.toString());
-
-          const readings: Record<string, { previous: string; current: string }> = {};
-          periodData.floorsElectricity.forEach(f => {
-            readings[f.floorId] = {
-              previous: f.previousReading.toString(),
-              current: f.currentReading.toString(),
-            };
-          });
-          setFloorReadings(readings);
-
-          const floorsPaying = new Set<string>();
-          periodData.floorsElectricity.forEach(f => {
-            if (f.paysSurplus) floorsPaying.add(f.floorId);
-          });
-          setFloorsPayingSurplus(floorsPaying);
-
-          if (periodData.savedSettings) {
-            setSettings(periodData.savedSettings);
-          } else {
-            const cloudSettings = await getGroupSettings(code);
-            if (cloudSettings) {
-              setSettings(cloudSettings);
+        try {
+          // Una sola lectura al documento (antes se descargaba TODA la
+          // colección para abrir un período → lento y caro en Firestore).
+          const periodData = await getPeriodFromCloud(code, periodId);
+          if (periodData) {
+            applyPeriodData(periodData);
+            // En SQLite local savedSettings.floors viene vacío (no hay columna);
+            // en ese caso usar la config global para no quedarse sin pisos.
+            if (periodData.savedSettings?.floors?.length) {
+              setSettings(periodData.savedSettings);
+            } else {
+              const cloudSettings = await getGroupSettings(code).catch(() => null);
+              if (cloudSettings) {
+                setSettings(cloudSettings);
+              }
             }
+            try {
+              await repo.cachePeriod(periodData);
+            } catch (cacheError) {
+              console.error('Error cacheando período localmente:', cacheError);
+            }
+          } else {
+            const local = await repo.getPeriodById(periodId);
+            if (local) {
+              applyPeriodData(local);
+              const s = local.savedSettings?.floors?.length ? local.savedSettings : await repo.getSettings();
+              setSettings(s);
+            } else {
+              setNoData(true);
+            }
+          }
+        } catch (error) {
+          console.error('Error cargando desde cloud, usando datos locales:', error);
+          const local = await repo.getPeriodById(periodId);
+          if (local) {
+            applyPeriodData(local);
+            const s = local.savedSettings?.floors?.length ? local.savedSettings : await repo.getSettings();
+            setSettings(s);
+          } else {
+            setNoData(true);
           }
         }
       } else {
-        const repo = new SQLiteExpenseRepository(getDatabase());
         const periodData = await repo.getPeriodById(periodId);
 
         if (periodData) {
-          setPeriod(periodData);
-          setTotalReceiptElectricity(periodData.electricity.totalReceipt.toString());
-          setTotalReceiptWater(periodData.water.totalReceipt.toString());
-
-          const readings: Record<string, { previous: string; current: string }> = {};
-          periodData.floorsElectricity.forEach(f => {
-            readings[f.floorId] = {
-              previous: f.previousReading.toString(),
-              current: f.currentReading.toString(),
-            };
-          });
-          setFloorReadings(readings);
-
-          if (periodData.savedSettings) {
+          applyPeriodData(periodData);
+          if (periodData.savedSettings?.floors?.length) {
             setSettings(periodData.savedSettings);
           } else {
             const settingsData = await repo.getSettings();
             setSettings(settingsData);
           }
+        } else {
+          setNoData(true);
         }
       }
     } catch (error) {
@@ -185,8 +325,21 @@ const ExpenseDetailScreen: React.FC = () => {
     setLoading(false);
   };
 
-  const updateFloorReading = (floorId: string, field: 'previousReading' | 'currentReading', value: string) => {
-    if (!period || !settings) return;
+  // Espejos para callbacks estables (useCallback []): así las tarjetas
+  // memoizadas reciben siempre las mismas funciones y no se re-renderizan.
+  const settingsRef = React.useRef(settings);
+  settingsRef.current = settings;
+  const payingRef = React.useRef(floorsPayingSurplus);
+  payingRef.current = floorsPayingSurplus;
+  const periodRef = React.useRef(period);
+  periodRef.current = period;
+  // Cache de objeto vacío por piso (identidad estable para el memo cuando
+  // un piso aún no tiene lectura en el período).
+  const emptyFloorRef = React.useRef(new Map<string, FloorElectricityReading>());
+
+  const updateFloorReading = React.useCallback((floorId: string, field: 'previousReading' | 'currentReading', value: string) => {
+    const settings = settingsRef.current;
+    if (!settings) return;
 
     setFloorReadings(prev => ({
       ...prev,
@@ -200,45 +353,61 @@ const ExpenseDetailScreen: React.FC = () => {
     const floor = settings.floors.find(f => f.id === floorId);
     if (!floor) return;
 
-    const existingFloorIndex = period.floorsElectricity.findIndex(f => f.floorId === floorId);
-    const existingFloor = existingFloorIndex >= 0 ? period.floorsElectricity[existingFloorIndex] : null;
+    const prevPeriod = periodRef.current;
+    const existingFloor = prevPeriod?.floorsElectricity.find(f => f.floorId === floorId);
 
     const previousReading = field === 'previousReading' ? numValue : (existingFloor?.previousReading || 0);
     const currentReading = field === 'currentReading' ? numValue : (existingFloor?.currentReading || 0);
-    const currentSurplus = existingFloor?.surplus || 0;
-    const paysSurplus = existingFloor?.paysSurplus || false;
+    // Si el valor numérico no cambió (p. ej. blur sin editar o formato
+    // "10." vs "10"), no se recalcula ni se marca sucio: evita re-renders
+    // de toda la pantalla en cada tecla/blur.
+    if (
+      existingFloor &&
+      previousReading === existingFloor.previousReading &&
+      currentReading === existingFloor.currentReading
+    ) {
+      return;
+    }
+    // La tarifa manda del período (lo que se usó al crearlo), no del global actual,
+    // para que el recibo no cambie solo porque cambió la config global.
+    const tariff = prevPeriod?.electricity.tariffPerKwh || settings.electricityTariffPerKwh || 0.66;
+    const paysSurplus = existingFloor?.paysSurplus ?? payingRef.current.has(floorId);
     const floorIgvPercentage = floor.igvPercentage ?? settings.igvPercentage ?? 18;
     const floorFixedCharge = floor.fixedCharge ?? 0;
 
-    const consumptionPrice = Math.max(0, currentReading - previousReading) * settings.electricityTariffPerKwh;
-    const igv = consumptionPrice * (floorIgvPercentage / 100);
-    const fixedCharge = floorFixedCharge;
+    const kwh = Math.max(0, currentReading - previousReading);
+    const consumptionPrice = round2(kwh * tariff);
+    const igv = round2(consumptionPrice * (floorIgvPercentage / 100));
+    const fixedCharge = round2(floorFixedCharge);
+    const surplusKept = round2(existingFloor?.surplus || 0);
 
-    const calculated = {
+    const calculated: FloorElectricityReading = {
       floorId,
       floorName: floor.name,
       previousReading,
       currentReading,
-      realReading: Math.max(0, currentReading - previousReading),
+      realReading: round2(kwh),
       consumptionPrice,
       igv,
       fixedCharge,
-      surplus: currentSurplus,
+      surplus: surplusKept,
       paysSurplus,
-      totalToPay: 0,
+      totalToPay: round2(consumptionPrice + igv + fixedCharge + surplusKept),
     };
-    calculated.totalToPay = calculated.consumptionPrice + calculated.igv + calculated.fixedCharge + calculated.surplus;
 
-    const newFloorsElectricity = [...period.floorsElectricity];
-    if (existingFloorIndex >= 0) {
-      newFloorsElectricity[existingFloorIndex] = calculated;
-    } else {
-      newFloorsElectricity.push(calculated);
-    }
-
-    setPeriod({ ...period, floorsElectricity: newFloorsElectricity });
+    setPeriod(prev => {
+      if (!prev) return prev;
+      const idx = prev.floorsElectricity.findIndex(f => f.floorId === floorId);
+      const next = [...prev.floorsElectricity];
+      if (idx >= 0) {
+        next[idx] = calculated;
+      } else {
+        next.push(calculated);
+      }
+      return { ...prev, floorsElectricity: next };
+    });
     setHasChanges(true);
-  };
+  }, []);
 
   const calculateAll = () => {
     if (!period || !settings) {
@@ -251,110 +420,77 @@ const ExpenseDetailScreen: React.FC = () => {
       return;
     }
 
-    const recalculatedFloors = period.floorsElectricity.map(f => {
-      const floorConfig = settings.floors.find(fl => fl.id === f.floorId);
-      const floorIgvPercentage = floorConfig?.igvPercentage ?? settings.igvPercentage ?? 18;
-      const floorFixedCharge = floorConfig?.fixedCharge ?? 0;
+    // Asegurar que todos los pisos con medidor existan en el período
+    // (si se agregó un piso después de crear el período, antes quedaba fuera de luz).
+    const tariff = period.electricity.tariffPerKwh || settings.electricityTariffPerKwh || 0.66;
+    const receiptTotal = round2(parseFloat(totalReceiptElectricity) || 0);
+    const waterReceiptTotal = round2(parseFloat(totalReceiptWater) || 0);
 
-      const igv = f.consumptionPrice * (floorIgvPercentage / 100);
+    const elecInputs = settings.floors
+      .filter(f => f.hasElectricityMeter !== false)
+      .map(f => {
+        const existing = period.floorsElectricity.find(fe => fe.floorId === f.id);
+        const prev = existing?.previousReading ?? 0;
+        const currStr = floorReadings[f.id]?.current;
+        const prevStr = floorReadings[f.id]?.previous;
+        // floorReadings manda si el usuario lo editó y aún no guardó
+        const previousReading = prevStr !== undefined && prevStr !== '' ? (parseFloat(prevStr) || 0) : prev;
+        const currentReading = currStr !== undefined && currStr !== ''
+          ? (parseFloat(currStr) || 0)
+          : (existing?.currentReading ?? 0);
+        return {
+          floorId: f.id,
+          floorName: f.name,
+          previousReading,
+          currentReading,
+          igvPercentage: f.igvPercentage ?? settings.igvPercentage ?? 18,
+          fixedCharge: f.fixedCharge ?? 0,
+          paysSurplus: floorsPayingSurplus.has(f.id),
+        };
+      });
 
-      return {
-        ...f,
-        igv,
-        fixedCharge: floorFixedCharge,
-        totalToPay: f.consumptionPrice + igv + floorFixedCharge + f.surplus,
-      };
-    });
-
-    const totalFromMeters = recalculatedFloors.reduce(
-      (sum, f) => sum + f.consumptionPrice + f.igv + f.fixedCharge,
-      0
-    );
-    const receiptTotal = parseFloat(totalReceiptElectricity) || 0;
-    const surplus = receiptTotal - totalFromMeters;
-
-    const payingFloors = Array.from(floorsPayingSurplus);
-    const payingCount = payingFloors.length;
-    let distributedSum = 0;
-    const updatedFloorsElectricity = recalculatedFloors.map(f => {
-      const paysSurplus = floorsPayingSurplus.has(f.floorId);
-      let perFloor = 0;
-      if (paysSurplus && payingCount > 0) {
-        const index = payingFloors.indexOf(f.floorId);
-        const isLast = index === payingCount - 1;
-        if (isLast) {
-          perFloor = parseFloat((surplus - distributedSum).toFixed(2));
-        } else {
-          perFloor = parseFloat((surplus / payingCount).toFixed(2));
-          distributedSum += perFloor;
-        }
-      }
-      return {
-        ...f,
-        surplus: perFloor,
-        paysSurplus,
-        totalToPay: f.consumptionPrice + f.igv + f.fixedCharge + (paysSurplus ? perFloor : 0),
-      };
-    });
-
-    const waterReceiptTotal = parseFloat(totalReceiptWater) || 0;
-    const totalFixedAmount = settings.floors.reduce((sum, f) => sum + (f.waterFixedAmount || 0), 0);
-    const remainingAfterFixed = Math.max(0, waterReceiptTotal - totalFixedAmount);
-
-    const floorsWithPercentage = settings.floors.filter(f => (f.waterPercentage || 0) > 0);
-    const totalPercentage = floorsWithPercentage.reduce((sum, f) => sum + (f.waterPercentage || 0), 0);
-
-    const floorsWater: FloorWaterCost[] = settings.floors.map(floor => {
-      const fixedAmount = floor.waterFixedAmount || 0;
-      let amountFromPercentage = 0;
-
-      if (floor.waterPercentage && floor.waterPercentage > 0 && totalPercentage > 0) {
-        amountFromPercentage = remainingAfterFixed * (floor.waterPercentage / totalPercentage);
-      } else if (totalPercentage === 0 && fixedAmount === 0) {
-        const floorsWithoutPercentage = settings.floors.filter(f => (f.waterPercentage || 0) === 0 && (f.waterFixedAmount || 0) === 0);
-        if (floorsWithoutPercentage.length > 0) {
-          amountFromPercentage = remainingAfterFixed / floorsWithoutPercentage.length;
-        }
-      }
-
-      return {
-        floorId: floor.id,
-        floorName: floor.name,
-        percentage: floor.waterPercentage || 0,
-        fixedAmount: fixedAmount,
-        amount: fixedAmount + amountFromPercentage,
-      };
-    });
+    const elec = calculateElectricity(elecInputs, tariff, receiptTotal);
+    const water = calculateWater(waterReceiptTotal, settings.floors);
 
     setPeriod({
       ...period,
       electricity: {
         ...period.electricity,
+        tariffPerKwh: tariff,
         totalReceipt: receiptTotal,
-        totalFromMeters,
-        surplus,
-        surplusToDistribute: surplus,
+        totalFromMeters: elec.totalFromMeters,
+        surplus: elec.surplus,
+        surplusToDistribute: elec.surplus,
       },
       water: {
+        ...period.water,
         totalReceipt: waterReceiptTotal,
       },
-      floorsElectricity: updatedFloorsElectricity,
-      floorsWater,
+      floorsElectricity: elec.floors,
+      floorsWater: water.floors,
     });
     setHasChanges(true);
 
-    const totalToPayFinal = updatedFloorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);
-    const totalWaterToPay = floorsWater.reduce((sum, f) => sum + f.amount, 0);
+    const warnLines: string[] = [];
+    if (elec.surplus < 0) warnLines.push(`⚠️ El recibo es MENOR que los medidores por ${formatCurrency(Math.abs(elec.surplus))}. Revisa lecturas o tarifa.`);
+    if (floorsPayingSurplus.size === 0 && elec.surplus !== 0) warnLines.push('⚠️ Nadie paga excedente: el excedente quedará sin cobrar.');
+    if (Math.abs(water.totalPercentage - 100) > 0.01) warnLines.push(`⚠️ Agua: los porcentajes suman ${water.totalPercentage}% (deberían sumar 100%). Quedan ${formatCurrency(water.undistributed)} sin distribuir.`);
+    if (water.totalFixed > waterReceiptTotal && waterReceiptTotal > 0) warnLines.push('⚠️ Agua: los montos fijos superan el recibo.');
 
     setFeedbackData({
       title: 'Cálculo completado',
-      message: `ELECTRICIDAD:\nTotal medidores: ${formatCurrency(totalFromMeters)}\nTotal recibo: ${formatCurrency(receiptTotal)}\nExcedente: ${formatCurrency(surplus)}\n\nAGUA:\nTotal recibo: ${formatCurrency(waterReceiptTotal)}\nDistribuido: ${formatCurrency(totalWaterToPay)}`,
+      message:
+        `ELECTRICIDAD:\nTotal medidores (consumo+IGV+cargo fijo): ${formatCurrency(elec.totalFromMeters)}\nTotal recibo: ${formatCurrency(receiptTotal)}\nExcedente: ${formatCurrency(elec.surplus)}\nTotal a cobrar: ${formatCurrency(elec.totalToCollect)}` +
+        `\n\nAGUA:\nTotal recibo: ${formatCurrency(waterReceiptTotal)}\nDistribuido: ${formatCurrency(water.totalDistributed)}` +
+        (warnLines.length ? `\n\n${warnLines.join('\n')}` : ''),
       variant: 'success',
     });
     setFeedbackDialogVisible(true);
   };
 
-  const toggleFloorSurplusPayment = (floorId: string) => {
+  // Estable (useCallback []) para no romper el memo de las tarjetas.
+  const toggleFloorSurplusPayment = React.useCallback((floorId: string) => {
+    const willPay = !payingRef.current.has(floorId);
     setFloorsPayingSurplus(prev => {
       const newSet = new Set(prev);
       if (newSet.has(floorId)) {
@@ -364,26 +500,39 @@ const ExpenseDetailScreen: React.FC = () => {
       }
       return newSet;
     });
-  };
+    // Sincronizar de inmediato con el período para que el cálculo
+    // y el guardado usen el mismo valor (antes solo vivía en el Set
+    // hasta presionar "Calcular" y se perdía al guardar).
+    setPeriod(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        floorsElectricity: prev.floorsElectricity.map(f =>
+          f.floorId === floorId ? { ...f, paysSurplus: willPay } : f,
+        ),
+      };
+    });
+    setHasChanges(true);
+  }, []);
 
   const savePeriod = async () => {
-    console.log(`${LOG_PREFIX} savePeriod - ini - period: ${period?.id}, groupCode: ${groupCode}`);
     if (!period || saving) return;
     setSaving(true);
     setHasChanges(false);
 
     try {
       if (groupCode) {
-        console.log(`${LOG_PREFIX} savePeriod - guardando en cloud`);
         await savePeriodToCloud(groupCode, period);
-        console.log(`${LOG_PREFIX} savePeriod - cloud ok`);
+        try {
+          const repo = getExpenseRepo();
+          await repo.cachePeriod(period);
+        } catch (cacheError) {
+          console.error(`${LOG_PREFIX} savePeriod - error cacheando local:`, cacheError);
+        }
       } else {
-        console.log(`${LOG_PREFIX} savePeriod - guardando en local`);
-        const repo = new SQLiteExpenseRepository(getDatabase());
+        const repo = getExpenseRepo();
         await repo.updatePeriod(period.id, period);
-        console.log(`${LOG_PREFIX} savePeriod - local ok`);
       }
-      console.log(`${LOG_PREFIX} savePeriod - éxito`);
       setFeedbackData({ title: 'Guardado', message: 'Datos actualizados correctamente', variant: 'success' });
       setFeedbackDialogVisible(true);
     } catch (error) {
@@ -397,7 +546,6 @@ const ExpenseDetailScreen: React.FC = () => {
   };
 
   const exportPeriod = async () => {
-    console.log(`${LOG_PREFIX} exportPeriod - ini`);
     if (!period || !settings) return;
     try {
       const totalElectricity = period.floorsElectricity.reduce((sum, f) => sum + f.totalToPay, 0);
@@ -426,19 +574,19 @@ const ExpenseDetailScreen: React.FC = () => {
           floor.previousReading.toFixed(1),
           floor.currentReading.toFixed(1),
           floor.realReading.toFixed(1),
-          `S/ ${floor.consumptionPrice.toFixed(2)}`,
-          `S/ ${floor.igv.toFixed(2)}`,
-          `S/ ${(floor.fixedCharge || 0).toFixed(2)}`,
-          `S/ ${floor.surplus.toFixed(2)}`,
-          `S/ ${floor.totalToPay.toFixed(2)}`
+          `S/${floor.consumptionPrice.toFixed(2)}`,
+          `S/${floor.igv.toFixed(2)}`,
+          `S/${(floor.fixedCharge || 0).toFixed(2)}`,
+          `S/${floor.surplus.toFixed(2)}`,
+          `S/${floor.totalToPay.toFixed(2)}`
         ].join(','));
       });
 
       csvLines.push('');
-      csvLines.push(`Total Recibo Luz:,,,S/ ${period.electricity.totalReceipt.toFixed(2)}`);
-      csvLines.push(`Total Medidores:,,,S/ ${period.electricity.totalFromMeters.toFixed(2)}`);
-      csvLines.push(`Excedente:,,,S/ ${period.electricity.surplus.toFixed(2)}`);
-      csvLines.push(`TOTAL ELECTRICIDAD:,,,S/ ${totalElectricity.toFixed(2)}`);
+      csvLines.push(`Total Recibo Luz:,,,S/${period.electricity.totalReceipt.toFixed(2)}`);
+      csvLines.push(`Total Medidores:,,,S/${period.electricity.totalFromMeters.toFixed(2)}`);
+      csvLines.push(`Excedente:,,,S/${period.electricity.surplus.toFixed(2)}`);
+      csvLines.push(`TOTAL ELECTRICIDAD:,,,S/${totalElectricity.toFixed(2)}`);
       csvLines.push('');
 
       csvLines.push('───────────────────────────────────────────────────────────────');
@@ -450,15 +598,15 @@ const ExpenseDetailScreen: React.FC = () => {
       period.floorsWater.forEach(floor => {
         csvLines.push([
           floor.floorName,
-          `S/ ${floor.fixedAmount.toFixed(2)}`,
+          `S/${floor.fixedAmount.toFixed(2)}`,
           `${floor.percentage}%`,
-          `S/ ${floor.amount.toFixed(2)}`
+          `S/${floor.amount.toFixed(2)}`
         ].join(','));
       });
 
       csvLines.push('');
-      csvLines.push(`Total Recibo Agua:,,,S/ ${period.water.totalReceipt.toFixed(2)}`);
-      csvLines.push(`TOTAL AGUA:,,,S/ ${totalWater.toFixed(2)}`);
+      csvLines.push(`Total Recibo Agua:,,,S/${period.water.totalReceipt.toFixed(2)}`);
+      csvLines.push(`TOTAL AGUA:,,,S/${totalWater.toFixed(2)}`);
       csvLines.push('');
 
       csvLines.push('═══════════════════════════════════════════════════════════════');
@@ -474,15 +622,15 @@ const ExpenseDetailScreen: React.FC = () => {
         const water = waterFloor?.amount || 0;
         csvLines.push([
           floor.name,
-          `S/ ${elec.toFixed(2)}`,
-          `S/ ${water.toFixed(2)}`,
-          `S/ ${(elec + water).toFixed(2)}`
+          `S/${elec.toFixed(2)}`,
+          `S/${water.toFixed(2)}`,
+          `S/${(elec + water).toFixed(2)}`
         ].join(','));
       });
 
       csvLines.push('');
       csvLines.push('═══════════════════════════════════════════════════════════════');
-      csvLines.push(`TOTAL GENERAL A PAGAR:,,,S/ ${grandTotal.toFixed(2)}`);
+      csvLines.push(`TOTAL GENERAL A PAGAR:,,,S/${grandTotal.toFixed(2)}`);
       csvLines.push('═══════════════════════════════════════════════════════════════');
 
       const csv = csvLines.join('\n');
@@ -763,113 +911,51 @@ const ExpenseDetailScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
           <Text style={styles.sectionSubtitle} numberOfLines={2}>
-            Tarifa: S/ {settings.electricityTariffPerKwh}/kWh  ·  IGV: {settings.igvPercentage}%
+            Tarifa: S/{settings.electricityTariffPerKwh}/kWh  ·  IGV: {settings.igvPercentage}%
           </Text>
 
-          {settings.floors.filter(f => f.hasElectricityMeter).map(floor => {
-            const floorData = period.floorsElectricity.find(f => f.floorId === floor.id) || {
-              floorId: floor.id,
-              floorName: floor.name,
-              previousReading: 0,
-              currentReading: 0,
-              realReading: 0,
-              consumptionPrice: 0,
-              igv: 0,
-              fixedCharge: 0,
-              surplus: 0,
-              paysSurplus: false,
-              totalToPay: 0,
-            };
+          {(settings.floors || []).filter(f => f.hasElectricityMeter).map(floor => {
+            let floorData = period.floorsElectricity.find(f => f.floorId === floor.id);
+            if (!floorData) {
+              // Objeto estable por piso para no romper el memo (un literal
+              // nuevo en cada render haría re-dibujar siempre).
+              const cached = emptyFloorRef.current.get(floor.id);
+              if (cached && cached.floorName === floor.name) {
+                floorData = cached;
+              } else {
+                floorData = {
+                  floorId: floor.id,
+                  floorName: floor.name,
+                  previousReading: 0,
+                  currentReading: 0,
+                  realReading: 0,
+                  consumptionPrice: 0,
+                  igv: 0,
+                  fixedCharge: 0,
+                  surplus: 0,
+                  paysSurplus: false,
+                  totalToPay: 0,
+                };
+                emptyFloorRef.current.set(floor.id, floorData);
+              }
+            }
 
             const savedReadings = floorReadings[floor.id] || { previous: '', current: '' };
             const displayPrevious = savedReadings.previous !== '' ? savedReadings.previous : (floorData.previousReading !== 0 ? floorData.previousReading.toString() : '');
             const displayCurrent = savedReadings.current !== '' ? savedReadings.current : (floorData.currentReading !== 0 ? floorData.currentReading.toString() : '');
 
             return (
-              <View key={floor.id} style={styles.floorCard}>
-                <View style={styles.floorCardHeader}>
-                  <House size={16} color={colors.textSecondary} weight="duotone" />
-                  <Text style={styles.floorName} numberOfLines={1}>{floor.name}</Text>
-                </View>
-
-                <View style={styles.readingRow}>
-                  <View style={styles.readingInput}>
-                    <Text style={styles.readingLabel}>Lect. Anterior</Text>
-                    <DecimalInput
-                      style={styles.input}
-                      value={displayPrevious}
-                      onChangeText={(v) => updateFloorReading(floor.id, 'previousReading', v)}
-                      placeholder="0"
-                    />
-                  </View>
-                  <View style={styles.readingInput}>
-                    <Text style={styles.readingLabel}>Lect. Actual</Text>
-                    <DecimalInput
-                      style={styles.input}
-                      value={displayCurrent}
-                      onChangeText={(v) => updateFloorReading(floor.id, 'currentReading', v)}
-                      placeholder="0"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.resultGrid}>
-                  <View style={styles.resultItem}>
-                    <Text style={styles.resultLabel}>Consumo</Text>
-                    <Text style={styles.resultValue}>{floorData.realReading.toFixed(1)} kWh</Text>
-                  </View>
-                  <View style={styles.resultDivider} />
-                  <View style={styles.resultItem}>
-                    <Text style={styles.resultLabel}>Costo</Text>
-                    <Text style={styles.resultValue}>{formatCurrency(floorData.consumptionPrice)}</Text>
-                  </View>
-                  <View style={styles.resultDivider} />
-                  <View style={styles.resultItem}>
-                    <Text style={styles.resultLabel}>IGV</Text>
-                    <Text style={styles.resultValue}>{formatCurrency(floorData.igv)}</Text>
-                  </View>
-                </View>
-
-                {(floorData.fixedCharge > 0) && (
-                  <View style={styles.fixedChargeRow}>
-                    <Text style={styles.fixedChargeLabel}>Cargo fijo</Text>
-                    <Text style={styles.fixedChargeValue}>{formatCurrency(floorData.fixedCharge)}</Text>
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={[
-                    styles.surplusToggle,
-                    floorsPayingSurplus.has(floor.id) && styles.surplusToggleActive
-                  ]}
-                  onPress={() => toggleFloorSurplusPayment(floor.id)}
-                  activeOpacity={0.7}
-                >
-                  {floorsPayingSurplus.has(floor.id) ? (
-                    <Check size={14} color={colors.primary.main} weight="bold" />
-                  ) : (
-                    <View style={styles.surplusCheckEmpty} />
-                  )}
-                  <Text style={[
-                    styles.surplusToggleText,
-                    floorsPayingSurplus.has(floor.id) && styles.surplusToggleTextActive
-                  ]}>
-                    {floorsPayingSurplus.has(floor.id) ? 'Paga excedente' : 'No paga excedente'}
-                  </Text>
-                </TouchableOpacity>
-
-                {floorData.surplus > 0 && (
-                  <View style={styles.surplusRow}>
-                    <Text style={styles.surplusLabel}>Excedente</Text>
-                    <Text style={styles.surplusValue}>{formatCurrency(floorData.surplus)}</Text>
-                  </View>
-                )}
-
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>TOTAL A PAGAR</Text>
-                  <Text style={styles.totalValue}>{formatCurrency(floorData.totalToPay)}</Text>
-                </View>
-              </View>
+              <FloorElectricityCard
+                key={floor.id}
+                floorId={floor.id}
+                floorName={floor.name}
+                floorData={floorData}
+                displayPrevious={displayPrevious}
+                displayCurrent={displayCurrent}
+                paysSurplus={floorsPayingSurplus.has(floor.id)}
+                onReadingChange={updateFloorReading}
+                onToggleSurplus={toggleFloorSurplusPayment}
+              />
             );
           })}
         </Animated.View>
@@ -938,7 +1024,7 @@ const ExpenseDetailScreen: React.FC = () => {
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total Medidores</Text>
               <Text style={styles.summaryValue}>
-                {formatCurrency(period.floorsElectricity.reduce((sum, f) => sum + f.consumptionPrice + f.igv, 0))}
+                {formatCurrency(period.floorsElectricity.reduce((sum, f) => sum + f.consumptionPrice + f.igv + (f.fixedCharge || 0), 0))}
               </Text>
             </View>
             <View style={styles.summaryRow}>
@@ -953,7 +1039,7 @@ const ExpenseDetailScreen: React.FC = () => {
                   Pagan excedente: {floorsPayingSurplus.size}
                 </Text>
                 <Text style={styles.summaryLabelSmall}>
-                  S/ {(period.electricity.surplus / floorsPayingSurplus.size).toFixed(2)} c/u
+                  S/{(period.electricity.surplus / floorsPayingSurplus.size).toFixed(2)} c/u
                 </Text>
               </View>
             )}
@@ -1034,11 +1120,11 @@ const ExpenseDetailScreen: React.FC = () => {
                 <View key={floor.floorId} style={styles.waterFloorRow}>
                   <View style={styles.waterFloorLeft}>
                     <House size={14} color={colors.textMuted} weight="duotone" />
-                    <Text style={styles.waterFloorName}>{floor.floorName}</Text>
+                    <Text style={styles.waterFloorName} numberOfLines={1}>{floor.floorName}</Text>
                   </View>
                   <View style={styles.waterFloorRight}>
                     {floor.fixedAmount > 0 ? (
-                      <Text style={styles.waterFloorFixed}>Fijo: S/ {floor.fixedAmount.toFixed(0)}</Text>
+                      <Text style={styles.waterFloorFixed}>Fijo: S/{floor.fixedAmount.toFixed(0)}</Text>
                     ) : null}
                     {floor.percentage > 0 ? (
                       <Text style={styles.waterFloorPercent}>{floor.percentage}%</Text>
@@ -1082,7 +1168,7 @@ const ExpenseDetailScreen: React.FC = () => {
                 <View key={floor.id} style={styles.totalByFloorRow}>
                   <View style={styles.totalByFloorLeft}>
                     <House size={14} color={colors.textMuted} weight="duotone" />
-                    <Text style={styles.totalByFloorName}>{floor.name}</Text>
+                    <Text style={styles.totalByFloorName} numberOfLines={1}>{floor.name}</Text>
                   </View>
                   <View style={styles.totalByFloorDetails}>
                     <View style={styles.totalByFloorTag}>
@@ -1288,10 +1374,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flex: 1,
   },
   sectionTitle: {
     ...typography.h4,
     color: colors.text,
+    flexShrink: 1,
   },
   sectionSubtitle: {
     ...typography.caption,
@@ -1365,11 +1453,13 @@ const styles = StyleSheet.create({
   resultLabel: {
     ...typography.caption,
     color: colors.textMuted,
+    flexShrink: 1,
   },
   resultValue: {
     ...typography.captionMedium,
     color: colors.text,
     marginTop: spacing[2],
+    flexShrink: 1,
   },
   fixedChargeRow: {
     flexDirection: 'row',
@@ -1384,10 +1474,13 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.warning,
     fontWeight: '500',
+    flexShrink: 1,
   },
   fixedChargeValue: {
     ...typography.currencySmall,
     color: colors.warning,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   surplusToggle: {
     flexDirection: 'row',
@@ -1431,10 +1524,13 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textSecondary,
     fontWeight: '500',
+    flexShrink: 1,
   },
   surplusValue: {
     ...typography.currencySmall,
     color: colors.warning,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   totalRow: {
     flexDirection: 'row',
@@ -1516,27 +1612,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing[8],
+    gap: spacing[12],
   },
   summaryLabel: {
     ...typography.bodySmall,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   summaryLabelSmall: {
     ...typography.caption,
     color: colors.warning,
     fontWeight: '500',
+    flexShrink: 1,
   },
   summaryLabelBold: {
     ...typography.bodyMedium,
     color: colors.text,
+    flexShrink: 1,
   },
   summaryValue: {
     ...typography.currencySmall,
     color: colors.text,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   summaryValueBold: {
     ...typography.currency,
     color: colors.accent.blue,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   summaryInput: {
     backgroundColor: colors.input.background,
@@ -1599,28 +1703,33 @@ const styles = StyleSheet.create({
   waterFloorName: {
     ...typography.bodySmall,
     color: colors.text,
+    flexShrink: 1,
   },
   waterFloorRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[8],
+    flexShrink: 1,
   },
   waterFloorFixed: {
     ...typography.caption,
     color: colors.warning,
     fontWeight: '600',
+    flexShrink: 1,
   },
   waterFloorPercent: {
     ...typography.caption,
     color: colors.textMuted,
     width: 40,
     textAlign: 'center',
+    flexShrink: 1,
   },
   waterFloorAmount: {
     ...typography.currencySmall,
     color: colors.accent.blueDark,
-    width: 80,
+    minWidth: 70,
     textAlign: 'right',
+    flexShrink: 1,
   },
   waterHintContainer: {
     alignItems: 'center',
@@ -1644,10 +1753,13 @@ const styles = StyleSheet.create({
   waterTotalSummaryLabel: {
     ...typography.bodyMedium,
     color: colors.text,
+    flexShrink: 1,
   },
   waterTotalSummaryValue: {
     ...typography.currency,
     color: colors.accent.blue,
+    flexShrink: 1,
+    textAlign: 'right',
   },
   totalByFloorCard: {
     backgroundColor: colors.card,
@@ -1673,27 +1785,31 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     fontWeight: '600',
     color: colors.text,
+    flexShrink: 1,
   },
   totalByFloorDetails: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing[8],
+    flexShrink: 1,
   },
   totalByFloorTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
+    flexShrink: 1,
   },
   totalByFloorDetail: {
     ...typography.caption,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   totalByFloorTotal: {
     ...typography.currencySmall,
     color: colors.success,
     minWidth: 80,
     textAlign: 'right',
+    flexShrink: 1,
   },
   grandTotalRow: {
     flexDirection: 'row',
